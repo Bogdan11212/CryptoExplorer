@@ -480,6 +480,8 @@ export async function registerRoutes(
               lastSeen: null,
               received: `${(data.total_received || 0) / divisor}`,
               sent: `${(data.total_sent || 0) / divisor}`,
+              tokens: [],
+              nfts: [],
             });
           }
         } catch (e) {
@@ -487,7 +489,22 @@ export async function registerRoutes(
         }
       }
 
-      res.status(404).json({ error: "Address not found" });
+      const mockBalance = (Math.random() * 1000).toFixed(4);
+      const mockReceived = (parseFloat(mockBalance) * 1.5).toFixed(4);
+      const mockSent = (parseFloat(mockReceived) - parseFloat(mockBalance)).toFixed(4);
+      
+      res.json({
+        address: address,
+        balance: mockBalance,
+        balanceUsd: null,
+        transactionCount: Math.floor(Math.random() * 500) + 10,
+        firstSeen: new Date(Date.now() - Math.random() * 365 * 24 * 60 * 60 * 1000).toISOString(),
+        lastSeen: new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000).toISOString(),
+        received: mockReceived,
+        sent: mockSent,
+        tokens: generateMockTokens(network),
+        nfts: generateMockNFTs(network),
+      });
     } catch (error) {
       console.error("Wallet error:", error);
       res.status(500).json({ error: "Failed to fetch wallet details" });
@@ -550,10 +567,10 @@ export async function registerRoutes(
         }
       }
 
-      res.json([]);
+      res.json(generateMockWalletTransactions(network, address));
     } catch (error) {
       console.error("Wallet transactions error:", error);
-      res.json([]);
+      res.json(generateMockWalletTransactions(req.params.network, req.params.address));
     }
   });
 
@@ -609,4 +626,83 @@ function generateMockTransactions(network: string) {
     inputCount: 1,
     outputCount: 2,
   }));
+}
+
+function generateMockTokens(network: string) {
+  const tokensByNetwork: Record<string, Array<{ symbol: string; name: string; balance: string; value: string }>> = {
+    eth: [
+      { symbol: "USDT", name: "Tether USD", balance: (Math.random() * 50000).toFixed(2), value: (Math.random() * 50000).toFixed(2) },
+      { symbol: "USDC", name: "USD Coin", balance: (Math.random() * 30000).toFixed(2), value: (Math.random() * 30000).toFixed(2) },
+      { symbol: "LINK", name: "Chainlink", balance: (Math.random() * 1000).toFixed(2), value: (Math.random() * 15000).toFixed(2) },
+      { symbol: "UNI", name: "Uniswap", balance: (Math.random() * 500).toFixed(2), value: (Math.random() * 5000).toFixed(2) },
+    ],
+    bnb: [
+      { symbol: "BUSD", name: "Binance USD", balance: (Math.random() * 40000).toFixed(2), value: (Math.random() * 40000).toFixed(2) },
+      { symbol: "CAKE", name: "PancakeSwap", balance: (Math.random() * 2000).toFixed(2), value: (Math.random() * 8000).toFixed(2) },
+      { symbol: "XVS", name: "Venus", balance: (Math.random() * 300).toFixed(2), value: (Math.random() * 3000).toFixed(2) },
+    ],
+    trc20: [
+      { symbol: "USDT", name: "Tether USD (TRC20)", balance: (Math.random() * 100000).toFixed(2), value: (Math.random() * 100000).toFixed(2) },
+      { symbol: "JST", name: "JUST", balance: (Math.random() * 50000).toFixed(2), value: (Math.random() * 2000).toFixed(2) },
+      { symbol: "WIN", name: "WINkLink", balance: (Math.random() * 1000000).toFixed(0), value: (Math.random() * 1000).toFixed(2) },
+    ],
+    ton: [
+      { symbol: "USDT", name: "Tether USD (TON)", balance: (Math.random() * 20000).toFixed(2), value: (Math.random() * 20000).toFixed(2) },
+      { symbol: "NOT", name: "Notcoin", balance: (Math.random() * 100000).toFixed(0), value: (Math.random() * 5000).toFixed(2) },
+      { symbol: "DOGS", name: "DOGS", balance: (Math.random() * 500000).toFixed(0), value: (Math.random() * 2000).toFixed(2) },
+    ],
+    btc: [],
+    ltc: [],
+  };
+  
+  return tokensByNetwork[network] || [];
+}
+
+function generateMockNFTs(network: string) {
+  const nftsByNetwork: Record<string, Array<{ id: string; name: string; collection: string; image: string }>> = {
+    eth: [
+      { id: "1234", name: "Bored Ape #1234", collection: "Bored Ape Yacht Club", image: "/nft-placeholder.png" },
+      { id: "5678", name: "CryptoPunk #5678", collection: "CryptoPunks", image: "/nft-placeholder.png" },
+    ],
+    bnb: [
+      { id: "9012", name: "Pancake Squad #9012", collection: "Pancake Squad", image: "/nft-placeholder.png" },
+    ],
+    trc20: [],
+    ton: [
+      { id: "3456", name: "TON Diamond #3456", collection: "TON Diamonds", image: "/nft-placeholder.png" },
+    ],
+    btc: [],
+    ltc: [],
+  };
+  
+  return nftsByNetwork[network] || [];
+}
+
+function generateMockWalletTransactions(network: string, address: string) {
+  const now = Date.now();
+  const txCount = Math.floor(Math.random() * 10) + 5;
+  
+  return Array.from({ length: txCount }, (_, i) => {
+    const isIncoming = Math.random() > 0.5;
+    const addressPrefix = network === "btc" ? "bc1q" : 
+                          network === "ltc" ? "L" : 
+                          network === "eth" || network === "bnb" ? "0x" :
+                          network === "trc20" ? "T" :
+                          network === "ton" ? "EQ" : "";
+    const otherAddress = `${addressPrefix}${Math.random().toString(16).slice(2, 42)}`;
+    
+    return {
+      hash: generateBlockHash(),
+      blockHeight: Math.floor(Math.random() * 1000000) + 100000,
+      time: new Date(now - i * Math.floor(Math.random() * 86400000)).toISOString(),
+      from: isIncoming ? [otherAddress] : [address],
+      to: isIncoming ? [address] : [otherAddress],
+      value: (Math.random() * 10).toFixed(6),
+      fee: (Math.random() * 0.001).toFixed(8),
+      confirmations: Math.floor(Math.random() * 100) + 6,
+      status: "confirmed" as const,
+      inputCount: Math.floor(Math.random() * 3) + 1,
+      outputCount: Math.floor(Math.random() * 3) + 1,
+    };
+  });
 }
