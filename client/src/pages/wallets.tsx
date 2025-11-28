@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { Wallet, Star, Plus, Trash2, ExternalLink, Crown, TrendingUp, Copy, Check } from "lucide-react";
+import { Wallet, Star, Plus, Trash2, ExternalLink, Crown, TrendingUp, Copy, Check, AlertCircle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -76,56 +76,11 @@ interface TopWallet {
   address: string;
   balance: string;
   balanceUsd: string;
-  label?: string;
+  label?: string | null;
   type: "exchange" | "whale" | "contract" | "unknown";
 }
 
 const STORAGE_KEY = "crypto_explorer_saved_wallets";
-
-const topWalletsData: Record<NetworkId, TopWallet[]> = {
-  btc: [
-    { rank: 1, address: "34xp4vRoCGJym3xR7yCVPFHoCNxv4Twseo", balance: "248,597.39", balanceUsd: "24.2B", label: "Binance Cold Wallet", type: "exchange" },
-    { rank: 2, address: "bc1qgdjqv0av3q56jvd82tkdjpy7gdp9ut8tlqmgrpmv24sq90ecnvqqjwvw97", balance: "178,010.00", balanceUsd: "17.3B", label: "Bitfinex", type: "exchange" },
-    { rank: 3, address: "1P5ZEDWTKTFGxQjZphgWPQUpe554WKDfHQ", balance: "94,643.29", balanceUsd: "9.2B", label: "Unknown Whale", type: "whale" },
-    { rank: 4, address: "37XuVSEpWW4trkfmvWzegTHQt7BdktSKUs", balance: "82,892.54", balanceUsd: "8.1B", label: "Robinhood", type: "exchange" },
-    { rank: 5, address: "bc1qa5wkgaew2dkv56kfvj49j0av5nml45x9ek9hz6", balance: "79,957.00", balanceUsd: "7.8B", label: "Kraken", type: "exchange" },
-  ],
-  eth: [
-    { rank: 1, address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", balance: "2,892,341.23", balanceUsd: "11.2B", label: "Wrapped Ether", type: "contract" },
-    { rank: 2, address: "0x8315177aB297bA92A06054cE80a67Ed4DBd7ed3a", balance: "1,547,283.45", balanceUsd: "6.0B", label: "Arbitrum Bridge", type: "contract" },
-    { rank: 3, address: "0x40B38765696e3d5d8d9d834D8AaD4bB6e418E489", balance: "1,234,567.89", balanceUsd: "4.8B", label: "Binance Hot Wallet", type: "exchange" },
-    { rank: 4, address: "0xBE0eB53F46cd790Cd13851d5EFf43D12404d33E8", balance: "987,654.32", balanceUsd: "3.8B", label: "Binance Cold Wallet", type: "exchange" },
-    { rank: 5, address: "0xDA9dfA130Df4dE4673b89022EE50ff26f6EA73Cf", balance: "876,543.21", balanceUsd: "3.4B", label: "Kraken", type: "exchange" },
-  ],
-  bnb: [
-    { rank: 1, address: "0xF977814e90dA44bFA03b6295A0616a897441aceC", balance: "32,847,592.11", balanceUsd: "21.3B", label: "Binance Hot Wallet", type: "exchange" },
-    { rank: 2, address: "0xBE0eB53F46cd790Cd13851d5EFf43D12404d33E8", balance: "18,234,567.89", balanceUsd: "11.8B", label: "Binance Cold Wallet 2", type: "exchange" },
-    { rank: 3, address: "0x8894E0a0c962CB723c1976a4421c95949bE2D4E3", balance: "12,345,678.90", balanceUsd: "8.0B", label: "PancakeSwap", type: "contract" },
-    { rank: 4, address: "0x5a52E96BAcdaBb82fd05763E25335261B270Efcb", balance: "8,765,432.10", balanceUsd: "5.7B", label: "Venus Protocol", type: "contract" },
-    { rank: 5, address: "0x631Fc1EA2270e98fbD9D92658eCe0F5a269Aa161", balance: "5,432,109.87", balanceUsd: "3.5B", label: "Unknown Whale", type: "whale" },
-  ],
-  trc20: [
-    { rank: 1, address: "TQn9Y2khEsLJW1ChVWFMSMeRDow5KcbLSE", balance: "8,234,567,890", balanceUsd: "8.2B", label: "Binance TRX", type: "exchange" },
-    { rank: 2, address: "TNaRAoLUyYEV2uF7GUrzSjRQTU8v5ZJ5VR", balance: "5,678,901,234", balanceUsd: "5.7B", label: "JustLend", type: "contract" },
-    { rank: 3, address: "TYDzsYUEpvnYmQk4zGP9sWWcTEd2MiAtW6", balance: "3,456,789,012", balanceUsd: "3.5B", label: "HTX Exchange", type: "exchange" },
-    { rank: 4, address: "TEkxiTehnzSmSe2XqrBj4w32RUN966rdz8", balance: "2,345,678,901", balanceUsd: "2.3B", label: "Sun.io", type: "contract" },
-    { rank: 5, address: "TKHuVq1oKVruCGLvqVexFs6dawKv6fQgFs", balance: "1,234,567,890", balanceUsd: "1.2B", label: "Unknown Whale", type: "whale" },
-  ],
-  ton: [
-    { rank: 1, address: "EQCjk1hh952vWaE9bRguFs9qmG2K0c5r7L3d9X2WxnZAqAI1", balance: "1,234,567,890", balanceUsd: "7.4B", label: "TON Foundation", type: "whale" },
-    { rank: 2, address: "EQCD39VS5jcptHL8vMjEXrzGaRcCVYto7HUn4bpAOg8xqB2N", balance: "876,543,210", balanceUsd: "5.3B", label: "Toncoin Staking", type: "contract" },
-    { rank: 3, address: "EQBynBO23ywHy_CgarY9NK9FTz0yDsG82PtcbSTQgGoXwiuA", balance: "543,210,987", balanceUsd: "3.3B", label: "OKX TON", type: "exchange" },
-    { rank: 4, address: "EQDtFpEwcFAEcRe5mLVh2N6C0x-_hJEM7W61_JLnSF74p4q2", balance: "321,098,765", balanceUsd: "1.9B", label: "Bybit TON", type: "exchange" },
-    { rank: 5, address: "EQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAM9c", balance: "210,987,654", balanceUsd: "1.3B", label: "System Contract", type: "contract" },
-  ],
-  ltc: [
-    { rank: 1, address: "LQTpS3VaYTjCr4s98vuLCxDShHRw1MxHJq", balance: "5,432,109.87", balanceUsd: "487M", label: "Binance Cold Wallet", type: "exchange" },
-    { rank: 2, address: "M8T1B2Z97gVdvmfkQcAtYbEepune1tzGua", balance: "3,456,789.01", balanceUsd: "310M", label: "Unknown Whale", type: "whale" },
-    { rank: 3, address: "LdP8Qox1VAhCzLJNqrr74YovaWYyNBUWvL", balance: "2,345,678.90", balanceUsd: "210M", label: "Coinbase", type: "exchange" },
-    { rank: 4, address: "LeE8DpVhKf5xxBqYPxSBqyKdHNNP7z7kDK", balance: "1,234,567.89", balanceUsd: "111M", label: "Kraken", type: "exchange" },
-    { rank: 5, address: "LTdsVS8VDw6sXvKrew2ET1scoB3WiNzWDy", balance: "987,654.32", balanceUsd: "88.7M", label: "OKX LTC", type: "exchange" },
-  ],
-};
 
 const typeColors = {
   exchange: "bg-blue-500/10 text-blue-500",
@@ -154,6 +109,22 @@ function saveSavedWallets(wallets: SavedWallet[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(wallets));
 }
 
+function TopWalletSkeleton() {
+  return (
+    <div className="flex items-center gap-4 p-4 rounded-lg border">
+      <Skeleton className="w-8 h-8 rounded-full" />
+      <div className="flex-1 space-y-2">
+        <Skeleton className="h-4 w-48" />
+        <Skeleton className="h-3 w-32" />
+      </div>
+      <div className="text-right space-y-1">
+        <Skeleton className="h-4 w-20 ml-auto" />
+        <Skeleton className="h-3 w-16 ml-auto" />
+      </div>
+    </div>
+  );
+}
+
 export default function WalletsPage() {
   const { selectedNetwork } = useNetwork();
   const { toast } = useToast();
@@ -169,7 +140,10 @@ export default function WalletsPage() {
     setSavedWallets(loadSavedWallets());
   }, []);
 
-  const topWallets = topWalletsData[selectedNetwork] || [];
+  const { data: topWallets = [], isLoading: topWalletsLoading, error: topWalletsError } = useQuery<TopWallet[]>({
+    queryKey: [`/api/top-wallets/${selectedNetwork}`],
+    staleTime: 60000,
+  });
 
   const handleAddWallet = () => {
     if (!newWalletAddress.trim()) {
@@ -354,40 +328,62 @@ export default function WalletsPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                {topWallets.map((wallet) => {
-                  const network = NETWORKS.find(n => n.id === selectedNetwork);
-                  return (
-                    <Link key={wallet.address} href={`/wallet/${selectedNetwork}/${wallet.address}`}>
-                      <div
-                        className="flex items-center gap-4 p-4 rounded-lg border hover-elevate cursor-pointer"
-                        data-testid={`top-wallet-${wallet.rank}`}
-                      >
-                        <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center font-bold text-sm">
-                          #{wallet.rank}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex flex-wrap items-center gap-2 mb-1">
-                            <span className="font-mono text-sm truncate">
-                              {truncateAddress(wallet.address, 8, 6)}
-                            </span>
-                            <Badge className={cn("text-xs", typeColors[wallet.type])}>
-                              {typeLabels[wallet.type]}
-                            </Badge>
+                {topWalletsLoading ? (
+                  <>
+                    <TopWalletSkeleton />
+                    <TopWalletSkeleton />
+                    <TopWalletSkeleton />
+                    <TopWalletSkeleton />
+                    <TopWalletSkeleton />
+                  </>
+                ) : topWalletsError || topWallets.length === 0 ? (
+                  <div className="py-12 text-center">
+                    <div className="w-16 h-16 rounded-full bg-muted mx-auto mb-4 flex items-center justify-center">
+                      <AlertCircle className="h-8 w-8 text-muted-foreground" />
+                    </div>
+                    <h3 className="font-semibold mb-2">No top wallets data available</h3>
+                    <p className="text-muted-foreground text-sm">
+                      Top wallet data is temporarily unavailable for this network.
+                      <br />
+                      Try switching to Bitcoin, Ethereum, or Litecoin for real-time data.
+                    </p>
+                  </div>
+                ) : (
+                  topWallets.map((wallet) => {
+                    const network = NETWORKS.find(n => n.id === selectedNetwork);
+                    return (
+                      <Link key={wallet.address} href={`/wallet/${selectedNetwork}/${wallet.address}`}>
+                        <div
+                          className="flex items-center gap-4 p-4 rounded-lg border hover-elevate cursor-pointer"
+                          data-testid={`top-wallet-${wallet.rank}`}
+                        >
+                          <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center font-bold text-sm">
+                            #{wallet.rank}
                           </div>
-                          {wallet.label && (
-                            <p className="text-xs text-muted-foreground">{wallet.label}</p>
-                          )}
+                          <div className="flex-1 min-w-0">
+                            <div className="flex flex-wrap items-center gap-2 mb-1">
+                              <span className="font-mono text-sm truncate">
+                                {truncateAddress(wallet.address, 8, 6)}
+                              </span>
+                              <Badge className={cn("text-xs", typeColors[wallet.type])}>
+                                {typeLabels[wallet.type]}
+                              </Badge>
+                            </div>
+                            {wallet.label && (
+                              <p className="text-xs text-muted-foreground">{wallet.label}</p>
+                            )}
+                          </div>
+                          <div className="text-right">
+                            <p className="font-medium">${wallet.balanceUsd}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {wallet.balance} {network?.symbol}
+                            </p>
+                          </div>
                         </div>
-                        <div className="text-right">
-                          <p className="font-medium">${wallet.balanceUsd}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {wallet.balance} {network?.symbol}
-                          </p>
-                        </div>
-                      </div>
-                    </Link>
-                  );
-                })}
+                      </Link>
+                    );
+                  })
+                )}
               </CardContent>
             </Card>
           </TabsContent>

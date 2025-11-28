@@ -1,24 +1,32 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 
+// API Endpoints
 const COINLORE_API = "https://api.coinlore.net/api";
 const BLOCKCHAIN_INFO_API = "https://blockchain.info";
 const BLOCKCYPHER_API = "https://api.blockcypher.com/v1";
+const MEMPOOL_API = "https://mempool.space/api";
+const BLOCKCHAIR_API = "https://api.blockchair.com";
+const BSC_RPC_API = "https://bsc-rpc.publicnode.com";
+const ETH_RPC_API = "https://ethereum-rpc.publicnode.com";
+const LITECOIN_SPACE_API = "https://litecoinspace.org/api";
+const TRONSCAN_API = "https://apilist.tronscanapi.com/api";
+const TONCENTER_API = "https://toncenter.com/api/v2";
 
-const NETWORK_CONFIG: Record<string, { coinloreId: string; blockcypherName?: string }> = {
-  btc: { coinloreId: "90", blockcypherName: "btc/main" },
-  eth: { coinloreId: "80", blockcypherName: "eth/main" },
-  bnb: { coinloreId: "2710" },
-  trc20: { coinloreId: "2713" },
+const NETWORK_CONFIG: Record<string, { coinloreId: string; blockcypherName?: string; blockchairName?: string }> = {
+  btc: { coinloreId: "90", blockcypherName: "btc/main", blockchairName: "bitcoin" },
+  eth: { coinloreId: "80", blockcypherName: "eth/main", blockchairName: "ethereum" },
+  bnb: { coinloreId: "2710", blockchairName: "bnb" },
+  trc20: { coinloreId: "2713", blockchairName: "tron" },
   ton: { coinloreId: "54683" },
-  ltc: { coinloreId: "1", blockcypherName: "ltc/main" },
+  ltc: { coinloreId: "1", blockcypherName: "ltc/main", blockchairName: "litecoin" },
 };
 
-async function fetchWithTimeout(url: string, timeout = 8000): Promise<Response> {
+async function fetchWithTimeout(url: string, timeout = 8000, options?: RequestInit): Promise<Response> {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeout);
   try {
-    const response = await fetch(url, { signal: controller.signal });
+    const response = await fetch(url, { ...options, signal: controller.signal });
     clearTimeout(id);
     return response;
   } catch (error) {
@@ -27,11 +35,30 @@ async function fetchWithTimeout(url: string, timeout = 8000): Promise<Response> 
   }
 }
 
+async function jsonRpcCall(url: string, method: string, params: any[] = []): Promise<any> {
+  const response = await fetchWithTimeout(url, 8000, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      method,
+      params,
+      id: 1,
+    }),
+  });
+  
+  if (!response.ok) throw new Error('RPC call failed');
+  const data = await response.json();
+  if (data.error) throw new Error(data.error.message);
+  return data.result;
+}
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
 
+  // Market Data API
   app.get("/api/market", async (req, res) => {
     try {
       const coinIds = Object.values(NETWORK_CONFIG).map(c => c.coinloreId).join(",");
@@ -49,6 +76,7 @@ export async function registerRoutes(
     }
   });
 
+  // Network Statistics API
   app.get("/api/stats/:network", async (req, res) => {
     try {
       const { network } = req.params;
@@ -58,6 +86,7 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Invalid network" });
       }
 
+      // Bitcoin - Use blockchain.info stats
       if (network === "btc") {
         try {
           const [statsRes, blocksRes] = await Promise.all([
@@ -83,42 +112,118 @@ export async function registerRoutes(
         }
       }
 
-      if (config.blockcypherName) {
+      // BNB/BSC - Use JSON-RPC
+      if (network === "bnb") {
         try {
-          const response = await fetchWithTimeout(`${BLOCKCYPHER_API}/${config.blockcypherName}`);
-          if (response.ok) {
-            const data = await response.json();
-            return res.json({
-              totalBlocks: data.height || 0,
-              totalTransactions: data.n_tx || 0,
-              avgBlockTime: network === "btc" ? 600 : network === "ltc" ? 150 : 15,
-              difficulty: data.difficulty ? formatDifficulty(data.difficulty) : "N/A",
-              hashrate: data.hash_rate || null,
-              mempoolSize: data.unconfirmed_count || 0,
-            });
-          }
+          const blockNumber = await jsonRpcCall(BSC_RPC_API, 'eth_blockNumber', []);
+          if (!blockNumber) throw new Error("Failed to get block number");
+          const block = await jsonRpcCall(BSC_RPC_API, 'eth_getBlockByNumber', [blockNumber, false]);
+          
+          return res.json({
+            totalBlocks: blockNumber ? parseInt(blockNumber, 16) : 0,
+            totalTransactions: block?.transactions?.length || 0,
+            avgBlockTime: 3,
+            difficulty: "N/A",
+            hashrate: null,
+            mempoolSize: 0,
+          });
         } catch (e) {
-          console.error("BlockCypher stats error:", e);
+          console.error("BSC stats error:", e);
         }
       }
 
-      res.json({
-        totalBlocks: network === "btc" ? 871000 : network === "eth" ? 21000000 : 5000000,
-        totalTransactions: network === "btc" ? 1000000000 : 2000000000,
-        avgBlockTime: network === "btc" ? 600 : network === "eth" ? 12 : network === "ltc" ? 150 : 15,
-        difficulty: "N/A",
-      });
+      // TRON - Use TronScan API (free, no auth required)
+      if (network === "trc20") {
+        try {
+          const response = await fetchWithTimeout(`${TRONSCAN_API}/block?sort=-number&limit=1`);
+          if (response.ok) {
+            const data = await response.json();
+            const latestBlock = data.data?.[0];
+            return res.json({
+              totalBlocks: latestBlock?.number || 0,
+              totalTransactions: latestBlock?.nrOfTrx || 0,
+              avgBlockTime: 3,
+              difficulty: "N/A",
+              hashrate: null,
+              mempoolSize: 0,
+            });
+          }
+        } catch (e) {
+          console.error("TRON stats error:", e);
+        }
+      }
+
+      // TON - Use TonCenter
+      if (network === "ton") {
+        try {
+          const response = await fetchWithTimeout(`${TONCENTER_API}/getMasterchainInfo`);
+          if (response.ok) {
+            const data = await response.json();
+            if (data.ok) {
+              return res.json({
+                totalBlocks: data.result?.last?.seqno || 0,
+                totalTransactions: 0,
+                avgBlockTime: 5,
+                difficulty: "N/A",
+                hashrate: null,
+                mempoolSize: 0,
+              });
+            }
+          }
+        } catch (e) {
+          console.error("TON stats error:", e);
+        }
+      }
+
+      // ETH - Use PublicNode RPC
+      if (network === "eth") {
+        try {
+          const blockNumber = await jsonRpcCall(ETH_RPC_API, 'eth_blockNumber', []);
+          if (blockNumber) {
+            const block = await jsonRpcCall(ETH_RPC_API, 'eth_getBlockByNumber', [blockNumber, false]);
+            return res.json({
+              totalBlocks: parseInt(blockNumber, 16),
+              totalTransactions: block?.transactions?.length || 0,
+              avgBlockTime: 12,
+              difficulty: "N/A (PoS)",
+              hashrate: null,
+              mempoolSize: 0,
+            });
+          }
+        } catch (e) {
+          console.error("ETH stats error:", e);
+        }
+      }
+
+      // LTC - Use Litecoin Space API
+      if (network === "ltc") {
+        try {
+          const response = await fetchWithTimeout(`${LITECOIN_SPACE_API}/v1/blocks`);
+          if (response.ok) {
+            const blocks = await response.json();
+            const latestBlock = blocks[0];
+            return res.json({
+              totalBlocks: latestBlock?.height || 0,
+              totalTransactions: latestBlock?.tx_count || 0,
+              avgBlockTime: 150,
+              difficulty: latestBlock?.difficulty ? formatDifficulty(latestBlock.difficulty) : "N/A",
+              hashrate: null,
+              mempoolSize: 0,
+            });
+          }
+        } catch (e) {
+          console.error("LTC stats error:", e);
+        }
+      }
+
+      res.status(503).json({ error: "Unable to fetch network statistics" });
     } catch (error) {
       console.error("Stats error:", error);
-      res.json({
-        totalBlocks: 850000,
-        totalTransactions: 1000000000,
-        avgBlockTime: 600,
-        difficulty: "N/A",
-      });
+      res.status(500).json({ error: "Failed to fetch network statistics" });
     }
   });
 
+  // Blocks API
   app.get("/api/blocks/:network", async (req, res) => {
     try {
       const { network } = req.params;
@@ -128,13 +233,35 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Invalid network" });
       }
 
+      // Bitcoin - Use Mempool.space for real-time blocks
       if (network === "btc") {
+        try {
+          const response = await fetchWithTimeout(`${MEMPOOL_API}/v1/blocks`);
+          if (response.ok) {
+            const blocks = await response.json();
+            const formattedBlocks = blocks.slice(0, 10).map((block: any) => ({
+              height: block.height,
+              hash: block.id,
+              time: new Date(block.timestamp * 1000).toISOString(),
+              transactionCount: block.tx_count,
+              size: block.size,
+              miner: block.extras?.pool?.name || null,
+              reward: "3.125",
+              difficulty: formatDifficulty(block.difficulty),
+              nonce: block.nonce?.toString(),
+              merkleRoot: block.merkle_root,
+            }));
+            return res.json(formattedBlocks);
+          }
+        } catch (e) {
+          console.error("Mempool blocks error:", e);
+        }
+        
+        // Fallback to blockchain.info
         try {
           const latestBlockRes = await fetchWithTimeout(`${BLOCKCHAIN_INFO_API}/latestblock`);
           if (latestBlockRes.ok) {
             const latestBlock = await latestBlockRes.json();
-            const blockHashes = latestBlock.txIndexes?.slice(0, 10) || [];
-            
             const blocksPromises = [];
             for (let i = 0; i < 10; i++) {
               const height = latestBlock.height - i;
@@ -158,7 +285,7 @@ export async function registerRoutes(
                   size: block.size,
                   miner: block.relayed_by || null,
                   reward: "3.125",
-                  difficulty: null,
+                  difficulty: block.difficulty ? formatDifficulty(block.difficulty) : null,
                   nonce: block.nonce?.toString(),
                   merkleRoot: block.mrkl_root,
                 };
@@ -173,40 +300,202 @@ export async function registerRoutes(
         }
       }
 
-      if (config.blockcypherName) {
+      // ETH - Use PublicNode RPC
+      if (network === "eth") {
         try {
-          const response = await fetchWithTimeout(`${BLOCKCYPHER_API}/${config.blockcypherName}`);
-          if (response.ok) {
-            const data = await response.json();
-            const currentHeight = data.height;
+          const blockNumber = await jsonRpcCall(ETH_RPC_API, 'eth_blockNumber', []);
+          if (blockNumber) {
+            const currentBlock = parseInt(blockNumber, 16);
             
-            const blocks = Array.from({ length: 10 }, (_, i) => ({
-              height: currentHeight - i,
-              hash: i === 0 ? data.hash : generateBlockHash(),
-              time: new Date(Date.now() - i * (network === "btc" ? 600000 : network === "ltc" ? 150000 : 15000)).toISOString(),
-              transactionCount: Math.floor(Math.random() * 2000) + 500,
-              size: Math.floor(Math.random() * 1000000) + 500000,
-              miner: null,
-              reward: network === "btc" ? "3.125" : network === "ltc" ? "12.5" : "2",
-              difficulty: data.difficulty ? formatDifficulty(data.difficulty) : null,
-              nonce: Math.floor(Math.random() * 1000000000).toString(),
-              merkleRoot: generateBlockHash(),
-            }));
+            const blockPromises = [];
+            for (let i = 0; i < 10; i++) {
+              const blockHex = '0x' + (currentBlock - i).toString(16);
+              blockPromises.push(
+                jsonRpcCall(ETH_RPC_API, 'eth_getBlockByNumber', [blockHex, false])
+                  .catch(() => null)
+              );
+            }
             
-            return res.json(blocks);
+            const blocksData = await Promise.all(blockPromises);
+            const blocks = blocksData
+              .filter(b => b && b.number && b.hash && b.timestamp)
+              .map(block => ({
+                height: block.number ? parseInt(block.number, 16) : 0,
+                hash: block.hash || "",
+                time: block.timestamp ? new Date(parseInt(block.timestamp, 16) * 1000).toISOString() : new Date().toISOString(),
+                transactionCount: block.transactions?.length || 0,
+                size: block.size ? parseInt(block.size, 16) : 0,
+                miner: block.miner || null,
+                reward: "0",
+                difficulty: "N/A (PoS)",
+                nonce: block.nonce || null,
+                merkleRoot: block.transactionsRoot || null,
+              }));
+            
+            if (blocks.length > 0) {
+              return res.json(blocks);
+            }
           }
         } catch (e) {
-          console.error("BlockCypher blocks error:", e);
+          console.error("ETH RPC blocks error:", e);
         }
       }
 
-      res.json(generateMockBlocks(network));
+      // BNB/BSC - Use JSON-RPC
+      if (network === "bnb") {
+        try {
+          const blockNumber = await jsonRpcCall(BSC_RPC_API, 'eth_blockNumber', []);
+          if (!blockNumber) throw new Error("Failed to get block number");
+          const currentBlock = parseInt(blockNumber, 16);
+          
+          const blockPromises = [];
+          for (let i = 0; i < 10; i++) {
+            const blockHex = '0x' + (currentBlock - i).toString(16);
+            blockPromises.push(
+              jsonRpcCall(BSC_RPC_API, 'eth_getBlockByNumber', [blockHex, false])
+                .catch(() => null)
+            );
+          }
+          
+          const blocksData = await Promise.all(blockPromises);
+          const blocks = blocksData
+            .filter(b => b && b.number && b.hash && b.timestamp)
+            .map(block => ({
+              height: block.number ? parseInt(block.number, 16) : 0,
+              hash: block.hash || "",
+              time: block.timestamp ? new Date(parseInt(block.timestamp, 16) * 1000).toISOString() : new Date().toISOString(),
+              transactionCount: block.transactions?.length || 0,
+              size: block.size ? parseInt(block.size, 16) : 0,
+              miner: block.miner || null,
+              reward: "0",
+              difficulty: block.difficulty ? parseInt(block.difficulty, 16).toString() : "0",
+              nonce: block.nonce || null,
+              merkleRoot: block.transactionsRoot || null,
+            }));
+          
+          if (blocks.length > 0) {
+            return res.json(blocks);
+          }
+        } catch (e) {
+          console.error("BSC blocks error:", e);
+        }
+      }
+
+      // TRON - Use TronScan API (free, no auth required)
+      if (network === "trc20") {
+        try {
+          const response = await fetchWithTimeout(`${TRONSCAN_API}/block?sort=-number&limit=10`);
+          if (response.ok) {
+            const data = await response.json();
+            const blocks = (data.data || []).map((block: any) => ({
+              height: block.number,
+              hash: block.hash,
+              time: new Date(block.timestamp).toISOString(),
+              transactionCount: block.nrOfTrx || 0,
+              size: block.size || 0,
+              miner: block.witnessAddress,
+              reward: (block.blockReward || 0).toString(),
+              difficulty: "N/A",
+              nonce: null,
+              merkleRoot: null,
+            }));
+            
+            if (blocks.length > 0) {
+              return res.json(blocks);
+            }
+          }
+        } catch (e) {
+          console.error("TRON blocks error:", e);
+        }
+      }
+
+      // TON - Use TonCenter
+      if (network === "ton") {
+        try {
+          const response = await fetchWithTimeout(`${TONCENTER_API}/getMasterchainInfo`);
+          if (response.ok) {
+            const data = await response.json();
+            if (data.ok && data.result) {
+              const lastSeqno = data.result.last.seqno;
+              
+              const blockPromises = [];
+              for (let i = 0; i < 10; i++) {
+                const seqno = lastSeqno - i;
+                if (seqno > 0) {
+                  blockPromises.push(
+                    fetchWithTimeout(`${TONCENTER_API}/getBlockHeader?workchain=-1&shard=-9223372036854775808&seqno=${seqno}`)
+                      .then(r => r.ok ? r.json() : null)
+                      .catch(() => null)
+                  );
+                }
+              }
+              
+              const blocksData = await Promise.all(blockPromises);
+              const blocks = blocksData
+                .filter(b => b && b.ok && b.result)
+                .map(b => {
+                  const block = b.result;
+                  const timestamp = block.gen_utime ? block.gen_utime * 1000 : Date.now();
+                  return {
+                    height: block.id?.seqno || 0,
+                    hash: block.id?.root_hash || "",
+                    time: new Date(timestamp).toISOString(),
+                    transactionCount: 0,
+                    size: 0,
+                    miner: null,
+                    reward: "0",
+                    difficulty: "N/A",
+                    nonce: null,
+                    merkleRoot: null,
+                  };
+                });
+              
+              if (blocks.length > 0) {
+                return res.json(blocks);
+              }
+            }
+          }
+        } catch (e) {
+          console.error("TON blocks error:", e);
+        }
+      }
+
+      // LTC - Use Litecoin Space API
+      if (network === "ltc") {
+        try {
+          const response = await fetchWithTimeout(`${LITECOIN_SPACE_API}/v1/blocks`);
+          if (response.ok) {
+            const blocksData = await response.json();
+            const blocks = blocksData.slice(0, 10).map((block: any) => ({
+              height: block.height,
+              hash: block.id,
+              time: new Date(block.timestamp * 1000).toISOString(),
+              transactionCount: block.tx_count,
+              size: block.size,
+              miner: block.extras?.pool?.name || null,
+              reward: (block.extras?.reward / 1e8 || 6.25).toFixed(4),
+              difficulty: block.difficulty ? formatDifficulty(block.difficulty) : null,
+              nonce: block.nonce?.toString(),
+              merkleRoot: block.merkle_root,
+            }));
+            
+            if (blocks.length > 0) {
+              return res.json(blocks);
+            }
+          }
+        } catch (e) {
+          console.error("Litecoin Space blocks error:", e);
+        }
+      }
+
+      res.status(503).json({ error: "Unable to fetch blocks" });
     } catch (error) {
       console.error("Blocks error:", error);
-      res.json(generateMockBlocks(req.params.network));
+      res.status(500).json({ error: "Failed to fetch blocks" });
     }
   });
 
+  // Single Block Details API
   app.get("/api/block/:network/:blockId", async (req, res) => {
     try {
       const { network, blockId } = req.params;
@@ -216,7 +505,35 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Invalid network" });
       }
 
+      // Bitcoin - Use Mempool.space
       if (network === "btc") {
+        try {
+          // Try by height first
+          const heightResponse = await fetchWithTimeout(`${MEMPOOL_API}/block-height/${blockId}`);
+          if (heightResponse.ok) {
+            const blockHash = await heightResponse.text();
+            const blockResponse = await fetchWithTimeout(`${MEMPOOL_API}/block/${blockHash}`);
+            if (blockResponse.ok) {
+              const block = await blockResponse.json();
+              return res.json({
+                height: block.height,
+                hash: block.id,
+                time: new Date(block.timestamp * 1000).toISOString(),
+                transactionCount: block.tx_count,
+                size: block.size,
+                miner: block.extras?.pool?.name || null,
+                reward: "3.125",
+                difficulty: formatDifficulty(block.difficulty),
+                nonce: block.nonce?.toString(),
+                merkleRoot: block.merkle_root,
+              });
+            }
+          }
+        } catch (e) {
+          console.error("Mempool block error:", e);
+        }
+        
+        // Fallback to blockchain.info
         try {
           const response = await fetchWithTimeout(`${BLOCKCHAIN_INFO_API}/block-height/${blockId}?format=json`);
           if (response.ok) {
@@ -242,47 +559,145 @@ export async function registerRoutes(
         }
       }
 
-      if (config.blockcypherName) {
+      // ETH - Use PublicNode RPC
+      if (network === "eth") {
         try {
-          const response = await fetchWithTimeout(`${BLOCKCYPHER_API}/${config.blockcypherName}/blocks/${blockId}`);
-          if (response.ok) {
-            const block = await response.json();
+          const blockHex = '0x' + parseInt(blockId).toString(16);
+          const block = await jsonRpcCall(ETH_RPC_API, 'eth_getBlockByNumber', [blockHex, false]);
+          if (block && block.number && block.hash) {
             return res.json({
-              height: block.height,
+              height: parseInt(block.number, 16),
               hash: block.hash,
-              time: block.time,
-              transactionCount: block.n_tx,
-              size: block.size || 0,
-              miner: null,
-              reward: network === "btc" ? "3.125" : network === "ltc" ? "12.5" : "2",
-              difficulty: block.difficulty?.toString() || null,
-              nonce: block.nonce?.toString(),
-              merkleRoot: block.mrkl_root,
+              time: block.timestamp ? new Date(parseInt(block.timestamp, 16) * 1000).toISOString() : new Date().toISOString(),
+              transactionCount: block.transactions?.length || 0,
+              size: block.size ? parseInt(block.size, 16) : 0,
+              miner: block.miner || null,
+              reward: "0",
+              difficulty: "N/A (PoS)",
+              nonce: block.nonce || null,
+              merkleRoot: block.transactionsRoot || null,
             });
           }
         } catch (e) {
-          console.error("BlockCypher block error:", e);
+          console.error("ETH RPC block error:", e);
         }
       }
 
-      res.json({
-        height: parseInt(blockId),
-        hash: generateBlockHash(),
-        time: new Date().toISOString(),
-        transactionCount: Math.floor(Math.random() * 2000) + 500,
-        size: Math.floor(Math.random() * 1000000) + 500000,
-        miner: null,
-        reward: network === "btc" ? "3.125" : "2",
-        difficulty: "N/A",
-        nonce: Math.floor(Math.random() * 1000000000).toString(),
-        merkleRoot: generateBlockHash(),
-      });
+      // BNB/BSC - Use JSON-RPC
+      if (network === "bnb") {
+        try {
+          const blockHex = '0x' + parseInt(blockId).toString(16);
+          const block = await jsonRpcCall(BSC_RPC_API, 'eth_getBlockByNumber', [blockHex, false]);
+          if (block && block.number && block.hash) {
+            return res.json({
+              height: block.number ? parseInt(block.number, 16) : 0,
+              hash: block.hash || "",
+              time: block.timestamp ? new Date(parseInt(block.timestamp, 16) * 1000).toISOString() : new Date().toISOString(),
+              transactionCount: block.transactions?.length || 0,
+              size: block.size ? parseInt(block.size, 16) : 0,
+              miner: block.miner || null,
+              reward: "0",
+              difficulty: block.difficulty ? parseInt(block.difficulty, 16).toString() : "0",
+              nonce: block.nonce || null,
+              merkleRoot: block.transactionsRoot || null,
+            });
+          }
+        } catch (e) {
+          console.error("BSC block error:", e);
+        }
+      }
+
+      // TRON - Use TronScan API
+      if (network === "trc20") {
+        try {
+          const response = await fetchWithTimeout(`${TRONSCAN_API}/block?number=${blockId}`);
+          if (response.ok) {
+            const data = await response.json();
+            const block = data.data?.[0];
+            if (block) {
+              return res.json({
+                height: block.number,
+                hash: block.hash,
+                time: new Date(block.timestamp).toISOString(),
+                transactionCount: block.nrOfTrx || 0,
+                size: block.size || 0,
+                miner: block.witnessAddress,
+                reward: (block.blockReward || 0).toString(),
+                difficulty: "N/A",
+                nonce: null,
+                merkleRoot: null,
+              });
+            }
+          }
+        } catch (e) {
+          console.error("TRON block error:", e);
+        }
+      }
+
+      // TON - Use TonCenter
+      if (network === "ton") {
+        try {
+          const response = await fetchWithTimeout(`${TONCENTER_API}/getBlockHeader?workchain=-1&shard=-9223372036854775808&seqno=${blockId}`);
+          if (response.ok) {
+            const data = await response.json();
+            if (data.ok && data.result) {
+              const block = data.result;
+              const timestamp = block.gen_utime ? block.gen_utime * 1000 : Date.now();
+              return res.json({
+                height: block.id?.seqno || parseInt(blockId),
+                hash: block.id?.root_hash || "",
+                time: new Date(timestamp).toISOString(),
+                transactionCount: 0,
+                size: 0,
+                miner: null,
+                reward: "0",
+                difficulty: "N/A",
+                nonce: null,
+                merkleRoot: null,
+              });
+            }
+          }
+        } catch (e) {
+          console.error("TON block error:", e);
+        }
+      }
+
+      // LTC - Use Litecoin Space API
+      if (network === "ltc") {
+        try {
+          const response = await fetchWithTimeout(`${LITECOIN_SPACE_API}/block-height/${blockId}`);
+          if (response.ok) {
+            const blockHash = await response.text();
+            const blockResponse = await fetchWithTimeout(`${LITECOIN_SPACE_API}/block/${blockHash}`);
+            if (blockResponse.ok) {
+              const block = await blockResponse.json();
+              return res.json({
+                height: block.height,
+                hash: block.id,
+                time: new Date(block.timestamp * 1000).toISOString(),
+                transactionCount: block.tx_count,
+                size: block.size,
+                miner: block.extras?.pool?.name || null,
+                reward: (block.extras?.reward / 1e8 || 6.25).toFixed(4),
+                difficulty: block.difficulty ? formatDifficulty(block.difficulty) : null,
+                nonce: block.nonce?.toString(),
+                merkleRoot: block.merkle_root,
+              });
+            }
+          }
+        } catch (e) {
+          console.error("Litecoin Space block error:", e);
+        }
+      }
+
+      res.status(404).json({ error: "Block not found" });
     } catch (error) {
       console.error("Block detail error:", error);
       res.status(500).json({ error: "Failed to fetch block details" });
     }
   });
 
+  // Block Transactions API
   app.get("/api/block/:network/:blockId/transactions", async (req, res) => {
     try {
       const { network, blockId } = req.params;
@@ -292,7 +707,36 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Invalid network" });
       }
 
+      // Bitcoin - Use Mempool.space
       if (network === "btc") {
+        try {
+          const heightResponse = await fetchWithTimeout(`${MEMPOOL_API}/block-height/${blockId}`);
+          if (heightResponse.ok) {
+            const blockHash = await heightResponse.text();
+            const txsResponse = await fetchWithTimeout(`${MEMPOOL_API}/block/${blockHash}/txs`);
+            if (txsResponse.ok) {
+              const txs = await txsResponse.json();
+              const formattedTxs = txs.slice(0, 20).map((tx: any) => ({
+                hash: tx.txid,
+                blockHeight: parseInt(blockId),
+                time: new Date(tx.status.block_time * 1000).toISOString(),
+                from: tx.vin?.map((v: any) => v.prevout?.scriptpubkey_address).filter(Boolean) || ["Coinbase"],
+                to: tx.vout?.map((v: any) => v.scriptpubkey_address).filter(Boolean) || [],
+                value: `${(tx.vout?.reduce((sum: number, v: any) => sum + (v.value || 0), 0) || 0) / 1e8}`,
+                fee: `${(tx.fee || 0) / 1e8}`,
+                confirmations: 6,
+                status: "confirmed" as const,
+                inputCount: tx.vin?.length || 0,
+                outputCount: tx.vout?.length || 0,
+              }));
+              return res.json(formattedTxs);
+            }
+          }
+        } catch (e) {
+          console.error("Mempool block txs error:", e);
+        }
+        
+        // Fallback to blockchain.info
         try {
           const response = await fetchWithTimeout(`${BLOCKCHAIN_INFO_API}/block-height/${blockId}?format=json`);
           if (response.ok) {
@@ -320,13 +764,127 @@ export async function registerRoutes(
         }
       }
 
-      res.json(generateMockTransactions(network));
+      // ETH - Use Blockchair
+      if (network === "eth" && config.blockchairName) {
+        try {
+          const response = await fetchWithTimeout(`${BLOCKCHAIR_API}/${config.blockchairName}/dashboards/block/${blockId}?limit=20`);
+          if (response.ok) {
+            const data = await response.json();
+            const transactions = data.data?.[blockId]?.transactions || [];
+            const txs = transactions.slice(0, 20).map((tx: any) => ({
+              hash: tx.hash,
+              blockHeight: tx.block_id,
+              time: tx.time,
+              from: [tx.sender],
+              to: [tx.recipient],
+              value: `${(tx.value || 0) / 1e18}`,
+              fee: `${(tx.fee || 0) / 1e18}`,
+              confirmations: 6,
+              status: "confirmed" as const,
+              inputCount: 1,
+              outputCount: 1,
+            }));
+            return res.json(txs);
+          }
+        } catch (e) {
+          console.error("Blockchair ETH block txs error:", e);
+        }
+      }
+
+      // BNB/BSC - Use JSON-RPC
+      if (network === "bnb") {
+        try {
+          const blockHex = '0x' + parseInt(blockId).toString(16);
+          const block = await jsonRpcCall(BSC_RPC_API, 'eth_getBlockByNumber', [blockHex, true]);
+          if (block && block.transactions && block.timestamp) {
+            const txs = block.transactions.slice(0, 20).map((tx: any) => ({
+              hash: tx.hash || "",
+              blockHeight: tx.blockNumber ? parseInt(tx.blockNumber, 16) : 0,
+              time: block.timestamp ? new Date(parseInt(block.timestamp, 16) * 1000).toISOString() : new Date().toISOString(),
+              from: [tx.from || "Unknown"],
+              to: tx.to ? [tx.to] : ["Contract Creation"],
+              value: `${tx.value ? parseInt(tx.value, 16) / 1e18 : 0}`,
+              fee: `${tx.gas && tx.gasPrice ? (parseInt(tx.gas, 16) * parseInt(tx.gasPrice, 16)) / 1e18 : 0}`,
+              confirmations: 6,
+              status: "confirmed" as const,
+              inputCount: 1,
+              outputCount: 1,
+            }));
+            return res.json(txs);
+          }
+        } catch (e) {
+          console.error("BSC block txs error:", e);
+        }
+      }
+
+      // TRON - Use TronScan API
+      if (network === "trc20") {
+        try {
+          const response = await fetchWithTimeout(`${TRONSCAN_API}/transaction?block=${blockId}&limit=20`);
+          if (response.ok) {
+            const data = await response.json();
+            const txs = (data.data || []).map((tx: any) => ({
+              hash: tx.hash,
+              blockHeight: tx.block || parseInt(blockId),
+              time: new Date(tx.timestamp).toISOString(),
+              from: [tx.ownerAddress || "Unknown"],
+              to: [tx.toAddress || tx.toAddressList?.[0] || "Unknown"],
+              value: `${(tx.amount || tx.contractData?.amount || 0) / 1e6}`,
+              fee: `${(tx.fee || 0) / 1e6}`,
+              confirmations: tx.confirmed ? 6 : 0,
+              status: tx.confirmed ? "confirmed" as const : "pending" as const,
+              inputCount: 1,
+              outputCount: 1,
+            }));
+            return res.json(txs);
+          }
+        } catch (e) {
+          console.error("TRON block txs error:", e);
+        }
+      }
+
+      // LTC - Use BlockCypher
+      if (network === "ltc" && config.blockcypherName) {
+        try {
+          const response = await fetchWithTimeout(`${BLOCKCYPHER_API}/${config.blockcypherName}/blocks/${blockId}?limit=20&txstart=0`);
+          if (response.ok) {
+            const block = await response.json();
+            if (block.txids) {
+              const txPromises = block.txids.slice(0, 10).map((txid: string) =>
+                fetchWithTimeout(`${BLOCKCYPHER_API}/${config.blockcypherName}/txs/${txid}`)
+                  .then(r => r.ok ? r.json() : null)
+                  .catch(() => null)
+              );
+              const txsData = await Promise.all(txPromises);
+              const txs = txsData.filter(tx => tx).map((tx: any) => ({
+                hash: tx.hash,
+                blockHeight: tx.block_height,
+                time: tx.received || tx.confirmed,
+                from: tx.inputs?.map((i: any) => i.addresses?.[0]).filter(Boolean) || [],
+                to: tx.outputs?.map((o: any) => o.addresses?.[0]).filter(Boolean) || [],
+                value: `${(tx.total || 0) / 1e8}`,
+                fee: `${(tx.fees || 0) / 1e8}`,
+                confirmations: tx.confirmations || 0,
+                status: tx.confirmations > 0 ? "confirmed" as const : "pending" as const,
+                inputCount: tx.inputs?.length || 0,
+                outputCount: tx.outputs?.length || 0,
+              }));
+              return res.json(txs);
+            }
+          }
+        } catch (e) {
+          console.error("BlockCypher LTC block txs error:", e);
+        }
+      }
+
+      res.json([]);
     } catch (error) {
       console.error("Block transactions error:", error);
       res.json([]);
     }
   });
 
+  // Recent Transactions API
   app.get("/api/transactions/:network", async (req, res) => {
     try {
       const { network } = req.params;
@@ -336,7 +894,32 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Invalid network" });
       }
 
+      // Bitcoin - Use Mempool.space for recent transactions
       if (network === "btc") {
+        try {
+          const response = await fetchWithTimeout(`${MEMPOOL_API}/mempool/recent`);
+          if (response.ok) {
+            const txs = await response.json();
+            const formattedTxs = txs.slice(0, 20).map((tx: any) => ({
+              hash: tx.txid,
+              blockHeight: 0,
+              time: new Date().toISOString(),
+              from: ["Pending..."],
+              to: ["Pending..."],
+              value: `${(tx.value || 0) / 1e8}`,
+              fee: `${(tx.fee || 0) / 1e8}`,
+              confirmations: 0,
+              status: "pending" as const,
+              inputCount: 1,
+              outputCount: 1,
+            }));
+            return res.json(formattedTxs);
+          }
+        } catch (e) {
+          console.error("Mempool recent txs error:", e);
+        }
+        
+        // Fallback to blockchain.info
         try {
           const response = await fetchWithTimeout(`${BLOCKCHAIN_INFO_API}/unconfirmed-transactions?format=json`);
           if (response.ok) {
@@ -363,13 +946,137 @@ export async function registerRoutes(
         }
       }
 
-      res.json(generateMockTransactions(network));
+      // ETH - Use Blockchair for recent transactions
+      if (network === "eth" && config.blockchairName) {
+        try {
+          const response = await fetchWithTimeout(`${BLOCKCHAIR_API}/${config.blockchairName}/transactions?limit=20`);
+          if (response.ok) {
+            const data = await response.json();
+            if (data.data) {
+              const txs = data.data.map((tx: any) => ({
+                hash: tx.hash,
+                blockHeight: tx.block_id,
+                time: tx.time,
+                from: [tx.sender],
+                to: [tx.recipient],
+                value: `${(tx.value || 0) / 1e18}`,
+                fee: `${(tx.fee || 0) / 1e18}`,
+                confirmations: 6,
+                status: "confirmed" as const,
+                inputCount: 1,
+                outputCount: 1,
+              }));
+              return res.json(txs);
+            }
+          }
+        } catch (e) {
+          console.error("Blockchair ETH txs error:", e);
+        }
+      }
+
+      // BNB/BSC - Get transactions from latest block
+      if (network === "bnb") {
+        try {
+          const blockNumber = await jsonRpcCall(BSC_RPC_API, 'eth_blockNumber', []);
+          if (!blockNumber) throw new Error("Failed to get block number");
+          const block = await jsonRpcCall(BSC_RPC_API, 'eth_getBlockByNumber', [blockNumber, true]);
+          if (block && block.transactions && block.timestamp) {
+            const txs = block.transactions.slice(0, 20).map((tx: any) => ({
+              hash: tx.hash || "",
+              blockHeight: tx.blockNumber ? parseInt(tx.blockNumber, 16) : 0,
+              time: block.timestamp ? new Date(parseInt(block.timestamp, 16) * 1000).toISOString() : new Date().toISOString(),
+              from: [tx.from || "Unknown"],
+              to: tx.to ? [tx.to] : ["Contract Creation"],
+              value: `${tx.value ? parseInt(tx.value, 16) / 1e18 : 0}`,
+              fee: `${tx.gas && tx.gasPrice ? (parseInt(tx.gas, 16) * parseInt(tx.gasPrice, 16)) / 1e18 : 0}`,
+              confirmations: 0,
+              status: "confirmed" as const,
+              inputCount: 1,
+              outputCount: 1,
+            }));
+            return res.json(txs);
+          }
+        } catch (e) {
+          console.error("BSC txs error:", e);
+        }
+      }
+
+      // TRON - Use TronScan API
+      if (network === "trc20") {
+        try {
+          const response = await fetchWithTimeout(`${TRONSCAN_API}/transaction?sort=-timestamp&limit=20`);
+          if (response.ok) {
+            const data = await response.json();
+            const txs = (data.data || []).map((tx: any) => ({
+              hash: tx.hash,
+              blockHeight: tx.block || 0,
+              time: new Date(tx.timestamp).toISOString(),
+              from: [tx.ownerAddress || "Unknown"],
+              to: [tx.toAddress || tx.toAddressList?.[0] || "Unknown"],
+              value: `${(tx.amount || tx.contractData?.amount || 0) / 1e6}`,
+              fee: `${(tx.fee || 0) / 1e6}`,
+              confirmations: tx.confirmed ? 6 : 0,
+              status: tx.confirmed ? "confirmed" as const : "pending" as const,
+              inputCount: 1,
+              outputCount: 1,
+            }));
+            return res.json(txs);
+          }
+        } catch (e) {
+          console.error("TRON txs error:", e);
+        }
+      }
+
+      // TON - Use TonCenter (rate limited, returns recent transactions from masterchain)
+      if (network === "ton") {
+        try {
+          const infoRes = await fetchWithTimeout(`${TONCENTER_API}/getMasterchainInfo`);
+          if (infoRes.ok) {
+            const info = await infoRes.json();
+            if (info.ok && info.result) {
+              return res.json([]);
+            }
+          }
+        } catch (e) {
+          console.error("TON txs error:", e);
+          return res.status(503).json({ error: "TON API unavailable" });
+        }
+      }
+
+      // LTC - Use Litecoin Space API (mempool transactions)
+      if (network === "ltc") {
+        try {
+          const response = await fetchWithTimeout(`${LITECOIN_SPACE_API}/mempool/recent`);
+          if (response.ok) {
+            const txsData = await response.json();
+            const txs = txsData.slice(0, 20).map((tx: any) => ({
+              hash: tx.txid,
+              blockHeight: 0,
+              time: new Date().toISOString(),
+              from: [],
+              to: [],
+              value: `${(tx.value || 0) / 1e8}`,
+              fee: `${(tx.fee || 0) / 1e8}`,
+              confirmations: 0,
+              status: "pending" as const,
+              inputCount: tx.vin?.length || 0,
+              outputCount: tx.vout?.length || 0,
+            }));
+            return res.json(txs);
+          }
+        } catch (e) {
+          console.error("Litecoin Space txs error:", e);
+        }
+      }
+
+      res.json([]);
     } catch (error) {
       console.error("Transactions error:", error);
-      res.json(generateMockTransactions(req.params.network));
+      res.json([]);
     }
   });
 
+  // Single Transaction Details API
   app.get("/api/transaction/:network/:txHash", async (req, res) => {
     try {
       const { network, txHash } = req.params;
@@ -379,7 +1086,31 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Invalid network" });
       }
 
+      // Bitcoin - Use Mempool.space
       if (network === "btc") {
+        try {
+          const response = await fetchWithTimeout(`${MEMPOOL_API}/tx/${txHash}`);
+          if (response.ok) {
+            const tx = await response.json();
+            return res.json({
+              hash: tx.txid,
+              blockHeight: tx.status?.block_height || 0,
+              time: tx.status?.block_time ? new Date(tx.status.block_time * 1000).toISOString() : new Date().toISOString(),
+              from: tx.vin?.map((v: any) => v.prevout?.scriptpubkey_address).filter(Boolean) || ["Coinbase"],
+              to: tx.vout?.map((v: any) => v.scriptpubkey_address).filter(Boolean) || [],
+              value: `${(tx.vout?.reduce((sum: number, v: any) => sum + (v.value || 0), 0) || 0) / 1e8}`,
+              fee: `${(tx.fee || 0) / 1e8}`,
+              confirmations: tx.status?.confirmed ? 6 : 0,
+              status: tx.status?.confirmed ? "confirmed" as const : "pending" as const,
+              inputCount: tx.vin?.length || 0,
+              outputCount: tx.vout?.length || 0,
+            });
+          }
+        } catch (e) {
+          console.error("Mempool tx error:", e);
+        }
+        
+        // Fallback to blockchain.info
         try {
           const response = await fetchWithTimeout(`${BLOCKCHAIN_INFO_API}/rawtx/${txHash}`);
           if (response.ok) {
@@ -403,20 +1134,129 @@ export async function registerRoutes(
         }
       }
 
-      if (config.blockcypherName) {
+      // ETH - Use Blockchair or BlockCypher
+      if (network === "eth") {
+        if (config.blockchairName) {
+          try {
+            const response = await fetchWithTimeout(`${BLOCKCHAIR_API}/${config.blockchairName}/dashboards/transaction/${txHash}`);
+            if (response.ok) {
+              const data = await response.json();
+              const tx = data.data?.[txHash]?.transaction;
+              if (tx) {
+                return res.json({
+                  hash: tx.hash,
+                  blockHeight: tx.block_id,
+                  time: tx.time,
+                  from: [tx.sender],
+                  to: [tx.recipient],
+                  value: `${(tx.value || 0) / 1e18}`,
+                  fee: `${(tx.fee || 0) / 1e18}`,
+                  confirmations: 6,
+                  status: "confirmed" as const,
+                  inputCount: 1,
+                  outputCount: 1,
+                });
+              }
+            }
+          } catch (e) {
+            console.error("Blockchair ETH tx error:", e);
+          }
+        }
+        
+        if (config.blockcypherName) {
+          try {
+            const response = await fetchWithTimeout(`${BLOCKCYPHER_API}/${config.blockcypherName}/txs/${txHash}`);
+            if (response.ok) {
+              const tx = await response.json();
+              return res.json({
+                hash: tx.hash,
+                blockHeight: tx.block_height || 0,
+                time: tx.received || new Date().toISOString(),
+                from: tx.inputs?.map((i: any) => i.addresses?.[0]).filter(Boolean) || [],
+                to: tx.outputs?.map((o: any) => o.addresses?.[0]).filter(Boolean) || [],
+                value: `${(tx.total || 0) / 1e18}`,
+                fee: `${(tx.fees || 0) / 1e18}`,
+                confirmations: tx.confirmations || 0,
+                status: tx.confirmations > 0 ? "confirmed" as const : "pending" as const,
+                inputCount: tx.inputs?.length || 0,
+                outputCount: tx.outputs?.length || 0,
+              });
+            }
+          } catch (e) {
+            console.error("BlockCypher ETH tx error:", e);
+          }
+        }
+      }
+
+      // BNB/BSC - Use JSON-RPC
+      if (network === "bnb") {
+        try {
+          const tx = await jsonRpcCall(BSC_RPC_API, 'eth_getTransactionByHash', [txHash]);
+          if (tx && tx.hash) {
+            const receipt = await jsonRpcCall(BSC_RPC_API, 'eth_getTransactionReceipt', [txHash]).catch(() => null);
+            const block = tx.blockNumber ? 
+              await jsonRpcCall(BSC_RPC_API, 'eth_getBlockByNumber', [tx.blockNumber, false]).catch(() => null) : null;
+            
+            return res.json({
+              hash: tx.hash || "",
+              blockHeight: tx.blockNumber ? parseInt(tx.blockNumber, 16) : 0,
+              time: block && block.timestamp ? new Date(parseInt(block.timestamp, 16) * 1000).toISOString() : new Date().toISOString(),
+              from: [tx.from || "Unknown"],
+              to: tx.to ? [tx.to] : ["Contract Creation"],
+              value: `${tx.value ? parseInt(tx.value, 16) / 1e18 : 0}`,
+              fee: receipt && receipt.gasUsed && tx.gasPrice ? `${(parseInt(receipt.gasUsed, 16) * parseInt(tx.gasPrice, 16)) / 1e18}` : "0",
+              confirmations: tx.blockNumber ? 6 : 0,
+              status: tx.blockNumber ? "confirmed" as const : "pending" as const,
+              inputCount: 1,
+              outputCount: 1,
+            });
+          }
+        } catch (e) {
+          console.error("BSC tx error:", e);
+        }
+      }
+
+      // TRON - Use TronScan API
+      if (network === "trc20") {
+        try {
+          const response = await fetchWithTimeout(`${TRONSCAN_API}/transaction-info?hash=${txHash}`);
+          if (response.ok) {
+            const tx = await response.json();
+            if (tx.hash) {
+              return res.json({
+                hash: tx.hash,
+                blockHeight: tx.block || 0,
+                time: new Date(tx.timestamp).toISOString(),
+                from: [tx.ownerAddress || "Unknown"],
+                to: [tx.toAddress || tx.contractData?.to_address || "Unknown"],
+                value: `${(tx.contractData?.amount || tx.amount || 0) / 1e6}`,
+                fee: `${(tx.fee || 0) / 1e6}`,
+                confirmations: tx.confirmed ? 6 : 0,
+                status: tx.confirmed ? "confirmed" as const : "pending" as const,
+                inputCount: 1,
+                outputCount: 1,
+              });
+            }
+          }
+        } catch (e) {
+          console.error("TRON tx error:", e);
+        }
+      }
+
+      // LTC - Use BlockCypher
+      if (network === "ltc" && config.blockcypherName) {
         try {
           const response = await fetchWithTimeout(`${BLOCKCYPHER_API}/${config.blockcypherName}/txs/${txHash}`);
           if (response.ok) {
             const tx = await response.json();
-            const divisor = network === "eth" ? 1e18 : 1e8;
             return res.json({
               hash: tx.hash,
               blockHeight: tx.block_height || 0,
               time: tx.received || new Date().toISOString(),
               from: tx.inputs?.map((i: any) => i.addresses?.[0]).filter(Boolean) || [],
               to: tx.outputs?.map((o: any) => o.addresses?.[0]).filter(Boolean) || [],
-              value: `${(tx.total || 0) / divisor}`,
-              fee: `${(tx.fees || 0) / divisor}`,
+              value: `${(tx.total || 0) / 1e8}`,
+              fee: `${(tx.fees || 0) / 1e8}`,
               confirmations: tx.confirmations || 0,
               status: tx.confirmations > 0 ? "confirmed" as const : "pending" as const,
               inputCount: tx.inputs?.length || 0,
@@ -424,7 +1264,7 @@ export async function registerRoutes(
             });
           }
         } catch (e) {
-          console.error("BlockCypher tx error:", e);
+          console.error("BlockCypher LTC tx error:", e);
         }
       }
 
@@ -435,6 +1275,7 @@ export async function registerRoutes(
     }
   });
 
+  // Wallet/Address Details API
   app.get("/api/wallet/:network/:address", async (req, res) => {
     try {
       const { network, address } = req.params;
@@ -444,7 +1285,30 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Invalid network" });
       }
 
+      // Bitcoin - Use Mempool.space or blockchain.info
       if (network === "btc") {
+        try {
+          const response = await fetchWithTimeout(`${MEMPOOL_API}/address/${address}`);
+          if (response.ok) {
+            const data = await response.json();
+            return res.json({
+              address: address,
+              balance: `${((data.chain_stats?.funded_txo_sum || 0) - (data.chain_stats?.spent_txo_sum || 0)) / 1e8}`,
+              balanceUsd: null,
+              transactionCount: (data.chain_stats?.tx_count || 0) + (data.mempool_stats?.tx_count || 0),
+              firstSeen: null,
+              lastSeen: null,
+              received: `${(data.chain_stats?.funded_txo_sum || 0) / 1e8}`,
+              sent: `${(data.chain_stats?.spent_txo_sum || 0) / 1e8}`,
+              tokens: [],
+              nfts: [],
+            });
+          }
+        } catch (e) {
+          console.error("Mempool address error:", e);
+        }
+        
+        // Fallback to blockchain.info
         try {
           const response = await fetchWithTimeout(`${BLOCKCHAIN_INFO_API}/rawaddr/${address}?limit=0`);
           if (response.ok) {
@@ -458,6 +1322,8 @@ export async function registerRoutes(
               lastSeen: null,
               received: `${(data.total_received || 0) / 1e8}`,
               sent: `${(data.total_sent || 0) / 1e8}`,
+              tokens: [],
+              nfts: [],
             });
           }
         } catch (e) {
@@ -465,52 +1331,175 @@ export async function registerRoutes(
         }
       }
 
-      if (config.blockcypherName) {
+      // ETH - Use Blockchair or BlockCypher
+      if (network === "eth") {
+        if (config.blockchairName) {
+          try {
+            const response = await fetchWithTimeout(`${BLOCKCHAIR_API}/${config.blockchairName}/dashboards/address/${address}`);
+            if (response.ok) {
+              const data = await response.json();
+              const addressData = data.data?.[address.toLowerCase()]?.address;
+              if (addressData) {
+                return res.json({
+                  address: address,
+                  balance: `${(addressData.balance || 0) / 1e18}`,
+                  balanceUsd: addressData.balance_usd ? `${addressData.balance_usd.toFixed(2)}` : null,
+                  transactionCount: addressData.transaction_count || 0,
+                  firstSeen: addressData.first_seen_receiving,
+                  lastSeen: addressData.last_seen_receiving,
+                  received: `${(addressData.received || 0) / 1e18}`,
+                  sent: `${(addressData.spent || 0) / 1e18}`,
+                  tokens: [],
+                  nfts: [],
+                });
+              }
+            }
+          } catch (e) {
+            console.error("Blockchair ETH wallet error:", e);
+          }
+        }
+        
+        if (config.blockcypherName) {
+          try {
+            const response = await fetchWithTimeout(`${BLOCKCYPHER_API}/${config.blockcypherName}/addrs/${address}/balance`);
+            if (response.ok) {
+              const data = await response.json();
+              return res.json({
+                address: address,
+                balance: `${(data.balance || 0) / 1e18}`,
+                balanceUsd: null,
+                transactionCount: data.n_tx || 0,
+                firstSeen: null,
+                lastSeen: null,
+                received: `${(data.total_received || 0) / 1e18}`,
+                sent: `${(data.total_sent || 0) / 1e18}`,
+                tokens: [],
+                nfts: [],
+              });
+            }
+          } catch (e) {
+            console.error("BlockCypher ETH wallet error:", e);
+          }
+        }
+      }
+
+      // BNB/BSC - Use JSON-RPC
+      if (network === "bnb") {
         try {
-          const response = await fetchWithTimeout(`${BLOCKCYPHER_API}/${config.blockcypherName}/addrs/${address}/balance`);
+          const balance = await jsonRpcCall(BSC_RPC_API, 'eth_getBalance', [address, 'latest']);
+          const txCount = await jsonRpcCall(BSC_RPC_API, 'eth_getTransactionCount', [address, 'latest']);
+          
+          return res.json({
+            address: address,
+            balance: `${balance ? parseInt(balance, 16) / 1e18 : 0}`,
+            balanceUsd: null,
+            transactionCount: txCount ? parseInt(txCount, 16) : 0,
+            firstSeen: null,
+            lastSeen: null,
+            received: "N/A",
+            sent: "N/A",
+            tokens: [],
+            nfts: [],
+          });
+        } catch (e) {
+          console.error("BSC wallet error:", e);
+        }
+      }
+
+      // TRON - Use TronScan API
+      if (network === "trc20") {
+        try {
+          const response = await fetchWithTimeout(`${TRONSCAN_API}/accountv2?address=${address}`);
+          if (response.ok) {
+            const account = await response.json();
+            if (account.address) {
+              return res.json({
+                address: account.address,
+                balance: `${(account.balance || 0) / 1e6}`,
+                balanceUsd: null,
+                transactionCount: account.transactions || 0,
+                firstSeen: account.date_created ? new Date(account.date_created).toISOString() : null,
+                lastSeen: account.latest_operation_time ? new Date(account.latest_operation_time).toISOString() : null,
+                received: "N/A",
+                sent: "N/A",
+                tokens: (account.withPriceTokens || []).slice(0, 10).map((t: any) => ({
+                  symbol: t.tokenAbbr || t.tokenName,
+                  name: t.tokenName,
+                  balance: t.balance ? (parseFloat(t.balance) / Math.pow(10, t.tokenDecimal || 6)).toFixed(4) : "0",
+                })),
+                nfts: [],
+              });
+            }
+          }
+        } catch (e) {
+          console.error("TRON wallet error:", e);
+        }
+      }
+
+      // TON - Use TonCenter
+      if (network === "ton") {
+        try {
+          const response = await fetchWithTimeout(`${TONCENTER_API}/getAddressInformation?address=${address}`);
           if (response.ok) {
             const data = await response.json();
-            const divisor = network === "eth" ? 1e18 : 1e8;
+            if (data.ok && data.result) {
+              return res.json({
+                address: address,
+                balance: `${(parseInt(data.result.balance) || 0) / 1e9}`,
+                balanceUsd: null,
+                transactionCount: 0,
+                firstSeen: null,
+                lastSeen: null,
+                received: "N/A",
+                sent: "N/A",
+                tokens: [],
+                nfts: [],
+              });
+            }
+          }
+        } catch (e) {
+          console.error("TON wallet error:", e);
+        }
+      }
+
+      // LTC - Use Litecoin Space API
+      if (network === "ltc") {
+        try {
+          const response = await fetchWithTimeout(`${LITECOIN_SPACE_API}/address/${address}`);
+          if (response.ok) {
+            const data = await response.json();
+            const chainStats = data.chain_stats || {};
+            const mempoolStats = data.mempool_stats || {};
+            const totalReceived = (chainStats.funded_txo_sum || 0) + (mempoolStats.funded_txo_sum || 0);
+            const totalSent = (chainStats.spent_txo_sum || 0) + (mempoolStats.spent_txo_sum || 0);
+            const balance = totalReceived - totalSent;
+            const txCount = (chainStats.tx_count || 0) + (mempoolStats.tx_count || 0);
             return res.json({
               address: address,
-              balance: `${(data.balance || 0) / divisor}`,
+              balance: `${balance / 1e8}`,
               balanceUsd: null,
-              transactionCount: data.n_tx || 0,
+              transactionCount: txCount,
               firstSeen: null,
               lastSeen: null,
-              received: `${(data.total_received || 0) / divisor}`,
-              sent: `${(data.total_sent || 0) / divisor}`,
+              received: `${totalReceived / 1e8}`,
+              sent: `${totalSent / 1e8}`,
               tokens: [],
               nfts: [],
             });
           }
         } catch (e) {
-          console.error("BlockCypher wallet error:", e);
+          console.error("Litecoin Space wallet error:", e);
         }
       }
 
-      const mockBalance = (Math.random() * 1000).toFixed(4);
-      const mockReceived = (parseFloat(mockBalance) * 1.5).toFixed(4);
-      const mockSent = (parseFloat(mockReceived) - parseFloat(mockBalance)).toFixed(4);
-      
-      res.json({
-        address: address,
-        balance: mockBalance,
-        balanceUsd: null,
-        transactionCount: Math.floor(Math.random() * 500) + 10,
-        firstSeen: new Date(Date.now() - Math.random() * 365 * 24 * 60 * 60 * 1000).toISOString(),
-        lastSeen: new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000).toISOString(),
-        received: mockReceived,
-        sent: mockSent,
-        tokens: generateMockTokens(network),
-        nfts: generateMockNFTs(network),
-      });
+      res.status(404).json({ error: "Address not found" });
     } catch (error) {
       console.error("Wallet error:", error);
       res.status(500).json({ error: "Failed to fetch wallet details" });
     }
   });
 
+  // Wallet Transactions API
   app.get("/api/wallet/:network/:address/transactions", async (req, res) => {
     try {
       const { network, address } = req.params;
@@ -520,7 +1509,30 @@ export async function registerRoutes(
         return res.status(400).json({ error: "Invalid network" });
       }
 
+      // Bitcoin - Use Mempool.space
       if (network === "btc") {
+        try {
+          const response = await fetchWithTimeout(`${MEMPOOL_API}/address/${address}/txs`);
+          if (response.ok) {
+            const txs = await response.json();
+            const formattedTxs = txs.slice(0, 20).map((tx: any) => ({
+              hash: tx.txid,
+              blockHeight: tx.status?.block_height || 0,
+              time: tx.status?.block_time ? new Date(tx.status.block_time * 1000).toISOString() : new Date().toISOString(),
+              from: tx.vin?.map((v: any) => v.prevout?.scriptpubkey_address).filter(Boolean) || [],
+              to: tx.vout?.map((v: any) => v.scriptpubkey_address).filter(Boolean) || [],
+              value: `${(tx.vout?.reduce((sum: number, v: any) => sum + (v.value || 0), 0) || 0) / 1e8}`,
+              fee: `${(tx.fee || 0) / 1e8}`,
+              confirmations: tx.status?.confirmed ? 6 : 0,
+              status: tx.status?.confirmed ? "confirmed" as const : "pending" as const,
+            }));
+            return res.json(formattedTxs);
+          }
+        } catch (e) {
+          console.error("Mempool address txs error:", e);
+        }
+        
+        // Fallback to blockchain.info
         try {
           const response = await fetchWithTimeout(`${BLOCKCHAIN_INFO_API}/rawaddr/${address}?limit=20`);
           if (response.ok) {
@@ -543,34 +1555,177 @@ export async function registerRoutes(
         }
       }
 
-      if (config.blockcypherName) {
+      // ETH - Use Blockchair
+      if (network === "eth" && config.blockchairName) {
         try {
-          const response = await fetchWithTimeout(`${BLOCKCYPHER_API}/${config.blockcypherName}/addrs/${address}`);
+          const response = await fetchWithTimeout(`${BLOCKCHAIR_API}/${config.blockchairName}/dashboards/address/${address}?limit=20`);
           if (response.ok) {
             const data = await response.json();
-            const divisor = network === "eth" ? 1e18 : 1e8;
-            const txs = (data.txrefs || []).slice(0, 20).map((tx: any) => ({
-              hash: tx.tx_hash,
-              blockHeight: tx.block_height || 0,
-              time: tx.confirmed || new Date().toISOString(),
-              from: [address],
-              to: [],
-              value: `${(tx.value || 0) / divisor}`,
-              fee: "0",
-              confirmations: tx.confirmations || 0,
-              status: tx.confirmations > 0 ? "confirmed" as const : "pending" as const,
+            const transactions = data.data?.[address.toLowerCase()]?.transactions || [];
+            
+            // Fetch transaction details
+            const txPromises = transactions.slice(0, 10).map((txHash: string) =>
+              fetchWithTimeout(`${BLOCKCHAIR_API}/${config.blockchairName}/dashboards/transaction/${txHash}`)
+                .then(r => r.ok ? r.json() : null)
+                .catch(() => null)
+            );
+            
+            const txsData = await Promise.all(txPromises);
+            const txs = txsData
+              .filter(d => d?.data)
+              .map(d => {
+                const txHash = Object.keys(d.data)[0];
+                const tx = d.data[txHash]?.transaction;
+                return tx ? {
+                  hash: tx.hash,
+                  blockHeight: tx.block_id,
+                  time: tx.time,
+                  from: [tx.sender],
+                  to: [tx.recipient],
+                  value: `${(tx.value || 0) / 1e18}`,
+                  fee: `${(tx.fee || 0) / 1e18}`,
+                  confirmations: 6,
+                  status: "confirmed" as const,
+                } : null;
+              })
+              .filter(Boolean);
+            
+            return res.json(txs);
+          }
+        } catch (e) {
+          console.error("Blockchair ETH wallet txs error:", e);
+        }
+      }
+
+      // BNB/BSC - Limited without indexer
+      if (network === "bnb") {
+        // JSON-RPC doesn't support transaction history lookup
+        // Would need an indexer service
+        return res.json([]);
+      }
+
+      // TRON - Use TronScan API
+      if (network === "trc20") {
+        try {
+          const response = await fetchWithTimeout(`${TRONSCAN_API}/transaction?address=${address}&limit=20&sort=-timestamp`);
+          if (response.ok) {
+            const data = await response.json();
+            if (data.data) {
+              const txs = data.data.map((tx: any) => ({
+                hash: tx.hash,
+                blockHeight: tx.block || 0,
+                time: new Date(tx.timestamp).toISOString(),
+                from: [tx.ownerAddress || "Unknown"],
+                to: [tx.toAddress || tx.toAddressList?.[0] || "Unknown"],
+                value: `${(tx.amount || tx.contractData?.amount || 0) / 1e6}`,
+                fee: `${(tx.fee || 0) / 1e6}`,
+                confirmations: tx.confirmed ? 6 : 0,
+                status: tx.confirmed ? "confirmed" as const : "pending" as const,
+              }));
+              return res.json(txs);
+            }
+          }
+        } catch (e) {
+          console.error("TRON wallet txs error:", e);
+        }
+      }
+
+      // TON - Use TonCenter
+      if (network === "ton") {
+        try {
+          const response = await fetchWithTimeout(`${TONCENTER_API}/getTransactions?address=${address}&limit=20`);
+          if (response.ok) {
+            const data = await response.json();
+            if (data.ok && data.result) {
+              const txs = data.result.map((tx: any) => ({
+                hash: tx.transaction_id?.hash || "",
+                blockHeight: tx.transaction_id?.lt || 0,
+                time: new Date(tx.utime * 1000).toISOString(),
+                from: [tx.in_msg?.source || address],
+                to: [tx.in_msg?.destination || address],
+                value: `${(parseInt(tx.in_msg?.value) || 0) / 1e9}`,
+                fee: `${(parseInt(tx.fee) || 0) / 1e9}`,
+                confirmations: 6,
+                status: "confirmed" as const,
+              }));
+              return res.json(txs);
+            }
+          }
+        } catch (e) {
+          console.error("TON wallet txs error:", e);
+        }
+      }
+
+      // LTC - Use Litecoin Space API
+      if (network === "ltc") {
+        try {
+          const response = await fetchWithTimeout(`${LITECOIN_SPACE_API}/address/${address}/txs`);
+          if (response.ok) {
+            const txsData = await response.json();
+            const txs = txsData.slice(0, 20).map((tx: any) => ({
+              hash: tx.txid,
+              blockHeight: tx.status?.block_height || 0,
+              time: tx.status?.block_time ? new Date(tx.status.block_time * 1000).toISOString() : new Date().toISOString(),
+              from: tx.vin?.map((v: any) => v.prevout?.scriptpubkey_address).filter(Boolean) || [],
+              to: tx.vout?.map((v: any) => v.scriptpubkey_address).filter(Boolean) || [],
+              value: `${(tx.vout?.reduce((sum: number, v: any) => sum + (v.value || 0), 0) || 0) / 1e8}`,
+              fee: `${(tx.fee || 0) / 1e8}`,
+              confirmations: tx.status?.confirmed ? 6 : 0,
+              status: tx.status?.confirmed ? "confirmed" as const : "pending" as const,
             }));
             return res.json(txs);
           }
         } catch (e) {
-          console.error("BlockCypher wallet txs error:", e);
+          console.error("Litecoin Space wallet txs error:", e);
         }
       }
 
-      res.json(generateMockWalletTransactions(network, address));
+      res.json([]);
     } catch (error) {
       console.error("Wallet transactions error:", error);
-      res.json(generateMockWalletTransactions(req.params.network, req.params.address));
+      res.json([]);
+    }
+  });
+
+  // Top Wallets API - Use Blockchair for real data
+  app.get("/api/top-wallets/:network", async (req, res) => {
+    try {
+      const { network } = req.params;
+      const config = NETWORK_CONFIG[network];
+      
+      if (!config) {
+        return res.status(400).json({ error: "Invalid network" });
+      }
+
+      // Use Blockchair for top addresses (limited without API key)
+      if (config.blockchairName && (network === "btc" || network === "eth" || network === "ltc")) {
+        try {
+          const response = await fetchWithTimeout(`${BLOCKCHAIR_API}/${config.blockchairName}/addresses?limit=10&s=balance(desc)`);
+          if (response.ok) {
+            const data = await response.json();
+            if (data.data) {
+              const divisor = network === "eth" ? 1e18 : 1e8;
+              const wallets = data.data.map((addr: any, index: number) => ({
+                rank: index + 1,
+                address: addr.address,
+                balance: (addr.balance / divisor).toLocaleString(),
+                balanceUsd: addr.balance_usd ? `${(addr.balance_usd / 1e9).toFixed(1)}B` : "N/A",
+                label: null,
+                type: "unknown" as const,
+              }));
+              return res.json(wallets);
+            }
+          }
+        } catch (e) {
+          console.error("Blockchair top wallets error:", e);
+        }
+      }
+
+      // For other networks, return empty as we don't have reliable free APIs
+      res.json([]);
+    } catch (error) {
+      console.error("Top wallets error:", error);
+      res.json([]);
     }
   });
 
@@ -583,126 +1738,4 @@ function formatDifficulty(difficulty: number): string {
   if (difficulty >= 1e9) return `${(difficulty / 1e9).toFixed(2)}G`;
   if (difficulty >= 1e6) return `${(difficulty / 1e6).toFixed(2)}M`;
   return difficulty.toFixed(2);
-}
-
-function generateBlockHash(): string {
-  return `${Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join("")}`;
-}
-
-function generateMockBlocks(network: string) {
-  const now = Date.now();
-  const blockTime = network === "btc" ? 600000 : network === "ltc" ? 150000 : network === "eth" ? 12000 : 15000;
-  const baseHeight = network === "btc" ? 871000 : network === "eth" ? 21000000 : network === "ltc" ? 2700000 : 50000000;
-  
-  return Array.from({ length: 10 }, (_, i) => ({
-    height: baseHeight - i,
-    hash: generateBlockHash(),
-    time: new Date(now - i * blockTime).toISOString(),
-    transactionCount: Math.floor(Math.random() * 2000) + 500,
-    size: Math.floor(Math.random() * 1000000) + 500000,
-    miner: null,
-    reward: network === "btc" ? "3.125" : network === "ltc" ? "12.5" : "2",
-    difficulty: "N/A",
-    nonce: Math.floor(Math.random() * 1000000000).toString(),
-    merkleRoot: generateBlockHash(),
-  }));
-}
-
-function generateMockTransactions(network: string) {
-  const now = Date.now();
-  const txInterval = 30000;
-  const baseHeight = network === "btc" ? 871000 : network === "eth" ? 21000000 : network === "ltc" ? 2700000 : 50000000;
-  
-  return Array.from({ length: 10 }, (_, i) => ({
-    hash: generateBlockHash(),
-    blockHeight: baseHeight - Math.floor(i / 3),
-    time: new Date(now - i * txInterval).toISOString(),
-    from: [`${network === "btc" || network === "ltc" ? "" : "0x"}${Math.random().toString(16).slice(2, 42)}`],
-    to: [`${network === "btc" || network === "ltc" ? "" : "0x"}${Math.random().toString(16).slice(2, 42)}`],
-    value: (Math.random() * 10).toFixed(6),
-    fee: (Math.random() * 0.001).toFixed(8),
-    confirmations: 6,
-    status: "confirmed" as const,
-    inputCount: 1,
-    outputCount: 2,
-  }));
-}
-
-function generateMockTokens(network: string) {
-  const tokensByNetwork: Record<string, Array<{ symbol: string; name: string; balance: string; value: string }>> = {
-    eth: [
-      { symbol: "USDT", name: "Tether USD", balance: (Math.random() * 50000).toFixed(2), value: (Math.random() * 50000).toFixed(2) },
-      { symbol: "USDC", name: "USD Coin", balance: (Math.random() * 30000).toFixed(2), value: (Math.random() * 30000).toFixed(2) },
-      { symbol: "LINK", name: "Chainlink", balance: (Math.random() * 1000).toFixed(2), value: (Math.random() * 15000).toFixed(2) },
-      { symbol: "UNI", name: "Uniswap", balance: (Math.random() * 500).toFixed(2), value: (Math.random() * 5000).toFixed(2) },
-    ],
-    bnb: [
-      { symbol: "BUSD", name: "Binance USD", balance: (Math.random() * 40000).toFixed(2), value: (Math.random() * 40000).toFixed(2) },
-      { symbol: "CAKE", name: "PancakeSwap", balance: (Math.random() * 2000).toFixed(2), value: (Math.random() * 8000).toFixed(2) },
-      { symbol: "XVS", name: "Venus", balance: (Math.random() * 300).toFixed(2), value: (Math.random() * 3000).toFixed(2) },
-    ],
-    trc20: [
-      { symbol: "USDT", name: "Tether USD (TRC20)", balance: (Math.random() * 100000).toFixed(2), value: (Math.random() * 100000).toFixed(2) },
-      { symbol: "JST", name: "JUST", balance: (Math.random() * 50000).toFixed(2), value: (Math.random() * 2000).toFixed(2) },
-      { symbol: "WIN", name: "WINkLink", balance: (Math.random() * 1000000).toFixed(0), value: (Math.random() * 1000).toFixed(2) },
-    ],
-    ton: [
-      { symbol: "USDT", name: "Tether USD (TON)", balance: (Math.random() * 20000).toFixed(2), value: (Math.random() * 20000).toFixed(2) },
-      { symbol: "NOT", name: "Notcoin", balance: (Math.random() * 100000).toFixed(0), value: (Math.random() * 5000).toFixed(2) },
-      { symbol: "DOGS", name: "DOGS", balance: (Math.random() * 500000).toFixed(0), value: (Math.random() * 2000).toFixed(2) },
-    ],
-    btc: [],
-    ltc: [],
-  };
-  
-  return tokensByNetwork[network] || [];
-}
-
-function generateMockNFTs(network: string) {
-  const nftsByNetwork: Record<string, Array<{ id: string; name: string; collection: string; image: string }>> = {
-    eth: [
-      { id: "1234", name: "Bored Ape #1234", collection: "Bored Ape Yacht Club", image: "/nft-placeholder.png" },
-      { id: "5678", name: "CryptoPunk #5678", collection: "CryptoPunks", image: "/nft-placeholder.png" },
-    ],
-    bnb: [
-      { id: "9012", name: "Pancake Squad #9012", collection: "Pancake Squad", image: "/nft-placeholder.png" },
-    ],
-    trc20: [],
-    ton: [
-      { id: "3456", name: "TON Diamond #3456", collection: "TON Diamonds", image: "/nft-placeholder.png" },
-    ],
-    btc: [],
-    ltc: [],
-  };
-  
-  return nftsByNetwork[network] || [];
-}
-
-function generateMockWalletTransactions(network: string, address: string) {
-  const now = Date.now();
-  const txCount = Math.floor(Math.random() * 10) + 5;
-  
-  return Array.from({ length: txCount }, (_, i) => {
-    const isIncoming = Math.random() > 0.5;
-    const addressPrefix = network === "btc" ? "bc1q" : 
-                          network === "ltc" ? "L" : 
-                          network === "eth" || network === "bnb" ? "0x" :
-                          network === "trc20" ? "T" :
-                          network === "ton" ? "EQ" : "";
-    const otherAddress = `${addressPrefix}${Math.random().toString(16).slice(2, 42)}`;
-    
-    return {
-      hash: generateBlockHash(),
-      blockHeight: Math.floor(Math.random() * 1000000) + 100000,
-      time: new Date(now - i * Math.floor(Math.random() * 86400000)).toISOString(),
-      from: isIncoming ? [otherAddress] : [address],
-      to: isIncoming ? [address] : [otherAddress],
-      value: (Math.random() * 10).toFixed(6),
-      fee: (Math.random() * 0.001).toFixed(8),
-      confirmations: Math.floor(Math.random() * 100) + 6,
-      status: "confirmed" as const,
-      inputCount: Math.floor(Math.random() * 3) + 1,
-      outputCount: Math.floor(Math.random() * 3) + 1,
-    };
-  });
 }
