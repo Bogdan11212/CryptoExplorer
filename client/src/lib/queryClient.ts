@@ -29,7 +29,35 @@ export const getQueryFn: <T>(options: {
 }) => QueryFunction<T> =
   ({ on401: unauthorizedBehavior }) =>
   async ({ queryKey }) => {
-    const res = await fetch(queryKey.join("/") as string, {
+    const baseUrl = queryKey[0] as string;
+    const pathParams: string[] = [];
+    const queryParams: Record<string, string> = {};
+    
+    for (let i = 1; i < queryKey.length; i++) {
+      const param = queryKey[i];
+      if (param === undefined || param === null) continue;
+      
+      if (typeof param === 'object' && param !== null) {
+        Object.entries(param).forEach(([key, value]) => {
+          if (value !== undefined && value !== null) {
+            queryParams[key] = String(value);
+          }
+        });
+      } else if (typeof param === 'number') {
+        queryParams['page'] = String(param);
+      } else {
+        pathParams.push(String(param));
+      }
+    }
+    
+    let fullUrl = pathParams.length > 0 ? `${baseUrl}/${pathParams.join("/")}` : baseUrl;
+    
+    const queryString = new URLSearchParams(queryParams).toString();
+    if (queryString) {
+      fullUrl += `?${queryString}`;
+    }
+    
+    const res = await fetch(fullUrl, {
       credentials: "include",
     });
 
@@ -47,8 +75,8 @@ export const queryClient = new QueryClient({
       queryFn: getQueryFn({ on401: "throw" }),
       refetchInterval: false,
       refetchOnWindowFocus: false,
-      staleTime: Infinity,
-      retry: false,
+      staleTime: 30000,
+      retry: 1,
     },
     mutations: {
       retry: false,
