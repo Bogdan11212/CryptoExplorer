@@ -3,10 +3,10 @@
 
 > Multi-chain blockchain explorer for real-time cryptocurrency data across 6 major networks
 
-[![Built with Replit](https://img.shields.io/badge/Built%20with-Replit-667881?style=flat&logo=replit)](https://replit.com)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-blue?style=flat&logo=typescript)](https://www.typescriptlang.org/)
 [![React](https://img.shields.io/badge/React-18-61dafb?style=flat&logo=react)](https://reactjs.org/)
 [![Express](https://img.shields.io/badge/Express-4-000000?style=flat&logo=express)](https://expressjs.com/)
+[![GitHub](https://img.shields.io/badge/GitHub-Repository-181717?style=flat&logo=github)](https://github.com/bogdan11212/CryptoExplorer)
 
 ## 📋 Overview
 
@@ -119,9 +119,9 @@ GET /api/top-wallets/:network           - Top wallet addresses
 
 ### Installation
 
-1. **Clone the repository** (or open in Replit)
+1. **Clone the repository**
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/bogdan11212/CryptoExplorer.git
 cd cryptoexplorer
 ```
 
@@ -270,22 +270,15 @@ Themes use CSS variables defined in `client/src/index.css`:
 
 ## 🚢 Deployment
 
-### Replit Deployment
-
-This project is optimized for deployment on Replit:
-
-1. Click **Deploy** in the Replit interface
-2. Configure autoscale deployment target
-3. Application automatically builds and deploys
+### Production Deployment
 
 Production configuration:
 - Build: `npm run build`
 - Start: `npm run start`
-- Port: 5000 (forwarded to 80/443)
+- Port: 5000
 
 ### Environment Variables
 
-Set in Replit Secrets:
 - `DATABASE_URL`: PostgreSQL connection string (optional)
 - `NODE_ENV`: Set to `production` for production builds
 
@@ -321,9 +314,9 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## 📞 Support
 
 For questions or issues:
-- Open an issue on GitHub
-- Contact via Replit community
+- Open an issue on [GitHub](https://github.com/bogdan11212/CryptoExplorer/issues)
+- Contact: [ceo@idevs.fun](mailto:ceo@idevs.fun)
 
 ---
 
-**Built with ❤️ on Replit**
+**Built with ❤️ by iDevs**
