@@ -63,6 +63,20 @@ export interface TransactionInfo {
   outputCount?: number;
 }
 
+export interface TokenInfo {
+  symbol: string;
+  name: string;
+  balance: string;
+  value: string;
+}
+
+export interface NFTInfo {
+  id: string;
+  name: string;
+  collection: string;
+  image: string;
+}
+
 export interface WalletInfo {
   address: string;
   balance: string;
@@ -72,6 +86,8 @@ export interface WalletInfo {
   lastSeen?: string;
   received: string;
   sent: string;
+  tokens?: TokenInfo[];
+  nfts?: NFTInfo[];
 }
 
 export interface SearchResult {
