@@ -14,6 +14,7 @@ import BlocksPage from "@/pages/blocks";
 import TransactionPage from "@/pages/transaction";
 import TransactionsPage from "@/pages/transactions";
 import WalletPage from "@/pages/wallet";
+import WalletsPage from "@/pages/wallets";
 import SearchPage from "@/pages/search";
 
 function Router() {
@@ -25,6 +26,7 @@ function Router() {
       <Route path="/transactions" component={TransactionsPage} />
       <Route path="/tx/:network/:txHash" component={TransactionPage} />
       <Route path="/wallet/:network/:address" component={WalletPage} />
+      <Route path="/wallets" component={WalletsPage} />
       <Route path="/search" component={SearchPage} />
       <Route component={NotFound} />
     </Switch>

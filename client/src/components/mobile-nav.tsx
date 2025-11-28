@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { Home, Blocks, ArrowRightLeft, Search } from "lucide-react";
+import { Home, Blocks, ArrowRightLeft, Search, Wallet } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useNetwork } from "@/lib/network-context";
 import { NetworkIcon } from "./crypto-icons";
@@ -7,7 +7,8 @@ import { NetworkIcon } from "./crypto-icons";
 const navItems = [
   { href: "/", label: "Home", icon: Home },
   { href: "/blocks", label: "Blocks", icon: Blocks },
-  { href: "/transactions", label: "Transactions", icon: ArrowRightLeft },
+  { href: "/transactions", label: "TXs", icon: ArrowRightLeft },
+  { href: "/wallets", label: "Wallets", icon: Wallet },
   { href: "/search", label: "Search", icon: Search },
 ];
 
@@ -83,7 +84,7 @@ export function BottomNav() {
   return (
     <nav className="fixed bottom-0 left-0 right-0 z-50 md:hidden border-t bg-background/80 backdrop-blur-xl">
       <div className="flex items-center justify-around py-2 px-4">
-        {navItems.slice(0, 4).map((item) => {
+        {navItems.slice(0, 5).map((item) => {
           const isActive = location === item.href;
           const Icon = item.icon;
           return (
