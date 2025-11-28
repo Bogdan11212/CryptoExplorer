@@ -2,6 +2,7 @@ import { Link, useLocation } from "wouter";
 import { Home, Blocks, ArrowRightLeft, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useNetwork } from "@/lib/network-context";
+import { NetworkIcon } from "./crypto-icons";
 
 const navItems = [
   { href: "/", label: "Home", icon: Home },
@@ -61,10 +62,10 @@ export function MobileNav() {
       <div className="p-4 border-t">
         <div className="flex items-center gap-3 px-4 py-3 rounded-lg bg-muted/50">
           <div
-            className="w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold"
+            className="w-8 h-8 rounded-full flex items-center justify-center text-white"
             style={{ backgroundColor: network.color }}
           >
-            {network.icon}
+            <NetworkIcon networkId={selectedNetwork} className="w-4 h-4" />
           </div>
           <div>
             <p className="text-sm font-medium">{network.name}</p>

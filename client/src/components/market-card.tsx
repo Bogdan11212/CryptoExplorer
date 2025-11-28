@@ -3,6 +3,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { type MarketData, type NetworkId } from "@shared/schema";
 import { formatCurrency, formatNumber, getPercentageColor, cn } from "@/lib/utils";
+import { NetworkIcon } from "./crypto-icons";
 
 interface MarketCardProps {
   data: MarketData;
@@ -27,15 +28,6 @@ const networkIconColors: Record<NetworkId, string> = {
   ltc: "bg-gray-400",
 };
 
-const networkIcons: Record<NetworkId, string> = {
-  btc: "₿",
-  eth: "Ξ",
-  bnb: "B",
-  trc20: "T",
-  ton: "◎",
-  ltc: "Ł",
-};
-
 export function MarketCard({ data, networkId }: MarketCardProps) {
   const change24h = parseFloat(data.percent_change_24h);
   const isPositive = change24h > 0;
@@ -57,11 +49,11 @@ export function MarketCard({ data, networkId }: MarketCardProps) {
           <div className="flex items-center gap-3">
             <div
               className={cn(
-                "w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center text-white font-bold text-lg sm:text-xl shadow-lg",
+                "w-10 h-10 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center text-white shadow-lg",
                 networkIconColors[networkId]
               )}
             >
-              {networkIcons[networkId]}
+              <NetworkIcon networkId={networkId} className="w-6 h-6 sm:w-7 sm:h-7" />
             </div>
             <div>
               <h3 className="font-semibold text-sm sm:text-base">{data.name}</h3>
