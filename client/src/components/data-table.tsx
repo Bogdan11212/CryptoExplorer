@@ -113,41 +113,50 @@ export function TransactionsTable({ transactions, networkId, showViewAll = true 
               </TableRow>
             </TableHeader>
             <TableBody>
-              {transactions.map((tx) => (
-                <TableRow key={tx.hash} className="hover-elevate" data-testid={`row-tx-${tx.hash.slice(0, 8)}`}>
-                  <TableCell>
-                    <Link href={`/tx/${networkId}/${tx.hash}`}>
-                      <span className="font-mono text-sm text-primary hover:underline">
-                        {tx.hash.slice(0, 10)}...
-                      </span>
-                    </Link>
-                  </TableCell>
-                  <TableCell className="hidden md:table-cell">
-                    {tx.from[0] && (
-                      <Link href={`/wallet/${networkId}/${tx.from[0]}`}>
-                        <span className="font-mono text-sm hover:text-primary">
-                          {tx.from[0].slice(0, 8)}...
+              {transactions.map((tx) => {
+                const txHash = tx.hash || "";
+                const fromAddr = tx.from?.[0];
+                const toAddr = tx.to?.[0];
+                return (
+                  <TableRow key={txHash} className="hover-elevate" data-testid={`row-tx-${txHash.slice(0, 8)}`}>
+                    <TableCell>
+                      <Link href={`/tx/${networkId}/${txHash}`}>
+                        <span className="font-mono text-sm text-primary hover:underline">
+                          {txHash.slice(0, 10)}...
                         </span>
                       </Link>
-                    )}
-                  </TableCell>
-                  <TableCell className="hidden md:table-cell">
-                    {tx.to[0] && (
-                      <Link href={`/wallet/${networkId}/${tx.to[0]}`}>
-                        <span className="font-mono text-sm hover:text-primary">
-                          {tx.to[0].slice(0, 8)}...
-                        </span>
-                      </Link>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-right font-mono text-sm">
-                    {formatCryptoAmount(tx.value, network.symbol)}
-                  </TableCell>
-                  <TableCell className="text-right text-muted-foreground text-sm">
-                    {formatTimeAgo(tx.time)}
-                  </TableCell>
-                </TableRow>
-              ))}
+                    </TableCell>
+                    <TableCell className="hidden md:table-cell">
+                      {fromAddr ? (
+                        <Link href={`/wallet/${networkId}/${fromAddr}`}>
+                          <span className="font-mono text-sm hover:text-primary">
+                            {fromAddr.slice(0, 8)}...
+                          </span>
+                        </Link>
+                      ) : (
+                        <span className="text-muted-foreground">-</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="hidden md:table-cell">
+                      {toAddr ? (
+                        <Link href={`/wallet/${networkId}/${toAddr}`}>
+                          <span className="font-mono text-sm hover:text-primary">
+                            {toAddr.slice(0, 8)}...
+                          </span>
+                        </Link>
+                      ) : (
+                        <span className="text-muted-foreground">-</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-sm">
+                      {formatCryptoAmount(tx.value, network.symbol)}
+                    </TableCell>
+                    <TableCell className="text-right text-muted-foreground text-sm">
+                      {formatTimeAgo(tx.time)}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
             </TableBody>
           </Table>
         </div>
@@ -196,14 +205,18 @@ interface MobileTransactionCardProps {
 export function MobileTransactionCard({ tx, networkId }: MobileTransactionCardProps) {
   const { getNetwork } = useNetwork();
   const network = getNetwork(networkId);
+  
+  const fromAddress = tx.from?.[0] || "Unknown";
+  const toAddress = tx.to?.[0] || "Unknown";
+  const txHash = tx.hash || "";
 
   return (
-    <Card className="hover-elevate" data-testid={`card-tx-${tx.hash.slice(0, 8)}`}>
+    <Card className="hover-elevate" data-testid={`card-tx-${txHash.slice(0, 8)}`}>
       <CardContent className="p-4">
         <div className="flex items-center justify-between mb-3">
-          <Link href={`/tx/${networkId}/${tx.hash}`}>
+          <Link href={`/tx/${networkId}/${txHash}`}>
             <span className="font-mono text-sm text-primary hover:underline">
-              {tx.hash.slice(0, 12)}...{tx.hash.slice(-8)}
+              {txHash.slice(0, 12)}...{txHash.slice(-8)}
             </span>
           </Link>
           <Badge
@@ -219,19 +232,27 @@ export function MobileTransactionCard({ tx, networkId }: MobileTransactionCardPr
         <div className="space-y-2 text-sm">
           <div className="flex justify-between">
             <span className="text-muted-foreground">From</span>
-            <Link href={`/wallet/${networkId}/${tx.from[0]}`}>
-              <span className="font-mono hover:text-primary">
-                {tx.from[0]?.slice(0, 8)}...
-              </span>
-            </Link>
+            {fromAddress !== "Unknown" ? (
+              <Link href={`/wallet/${networkId}/${fromAddress}`}>
+                <span className="font-mono hover:text-primary">
+                  {fromAddress.slice(0, 8)}...
+                </span>
+              </Link>
+            ) : (
+              <span className="font-mono text-muted-foreground">Unknown</span>
+            )}
           </div>
           <div className="flex justify-between">
             <span className="text-muted-foreground">To</span>
-            <Link href={`/wallet/${networkId}/${tx.to[0]}`}>
-              <span className="font-mono hover:text-primary">
-                {tx.to[0]?.slice(0, 8)}...
-              </span>
-            </Link>
+            {toAddress !== "Unknown" ? (
+              <Link href={`/wallet/${networkId}/${toAddress}`}>
+                <span className="font-mono hover:text-primary">
+                  {toAddress.slice(0, 8)}...
+                </span>
+              </Link>
+            ) : (
+              <span className="font-mono text-muted-foreground">Unknown</span>
+            )}
           </div>
           <div className="flex justify-between">
             <span className="text-muted-foreground">Value</span>
