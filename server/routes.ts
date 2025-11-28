@@ -764,21 +764,20 @@ export async function registerRoutes(
         }
       }
 
-      // ETH - Use Blockchair
-      if (network === "eth" && config.blockchairName) {
+      // ETH - Use PublicNode RPC
+      if (network === "eth") {
         try {
-          const response = await fetchWithTimeout(`${BLOCKCHAIR_API}/${config.blockchairName}/dashboards/block/${blockId}?limit=20`);
-          if (response.ok) {
-            const data = await response.json();
-            const transactions = data.data?.[blockId]?.transactions || [];
-            const txs = transactions.slice(0, 20).map((tx: any) => ({
-              hash: tx.hash,
-              blockHeight: tx.block_id,
-              time: tx.time,
-              from: [tx.sender],
-              to: [tx.recipient],
-              value: `${(tx.value || 0) / 1e18}`,
-              fee: `${(tx.fee || 0) / 1e18}`,
+          const blockHex = '0x' + parseInt(blockId).toString(16);
+          const block = await jsonRpcCall(ETH_RPC_API, 'eth_getBlockByNumber', [blockHex, true]);
+          if (block && block.transactions && block.timestamp) {
+            const txs = block.transactions.slice(0, 20).map((tx: any) => ({
+              hash: tx.hash || "",
+              blockHeight: tx.blockNumber ? parseInt(tx.blockNumber, 16) : 0,
+              time: block.timestamp ? new Date(parseInt(block.timestamp, 16) * 1000).toISOString() : new Date().toISOString(),
+              from: [tx.from || "Unknown"],
+              to: tx.to ? [tx.to] : ["Contract Creation"],
+              value: `${tx.value ? parseInt(tx.value, 16) / 1e18 : 0}`,
+              fee: `${tx.gas && tx.gasPrice ? (parseInt(tx.gas, 16) * parseInt(tx.gasPrice, 16)) / 1e18 : 0}`,
               confirmations: 6,
               status: "confirmed" as const,
               inputCount: 1,
@@ -787,7 +786,7 @@ export async function registerRoutes(
             return res.json(txs);
           }
         } catch (e) {
-          console.error("Blockchair ETH block txs error:", e);
+          console.error("ETH RPC block txs error:", e);
         }
       }
 
@@ -1066,13 +1065,14 @@ export async function registerRoutes(
           }
         } catch (e) {
           console.error("Litecoin Space txs error:", e);
+          return res.status(503).json({ error: "Litecoin API unavailable" });
         }
       }
 
-      res.json([]);
+      return res.status(404).json({ error: "No transactions found" });
     } catch (error) {
       console.error("Transactions error:", error);
-      res.json([]);
+      return res.status(500).json({ error: "Failed to fetch transactions" });
     }
   });
 
@@ -1553,6 +1553,7 @@ export async function registerRoutes(
         } catch (e) {
           console.error("Blockchain.info wallet txs error:", e);
         }
+        return res.status(503).json({ error: "Bitcoin API unavailable" });
       }
 
       // ETH - Use Blockchair
@@ -1595,12 +1596,11 @@ export async function registerRoutes(
         } catch (e) {
           console.error("Blockchair ETH wallet txs error:", e);
         }
+        return res.status(503).json({ error: "Ethereum API unavailable" });
       }
 
-      // BNB/BSC - Limited without indexer
+      // BNB/BSC - Limited without indexer (no free transaction history API available)
       if (network === "bnb") {
-        // JSON-RPC doesn't support transaction history lookup
-        // Would need an indexer service
         return res.json([]);
       }
 
@@ -1625,8 +1625,10 @@ export async function registerRoutes(
               return res.json(txs);
             }
           }
+          return res.status(503).json({ error: "TRON API unavailable" });
         } catch (e) {
           console.error("TRON wallet txs error:", e);
+          return res.status(503).json({ error: "TRON API unavailable" });
         }
       }
 
@@ -1651,8 +1653,10 @@ export async function registerRoutes(
               return res.json(txs);
             }
           }
+          return res.status(503).json({ error: "TON API unavailable" });
         } catch (e) {
           console.error("TON wallet txs error:", e);
+          return res.status(503).json({ error: "TON API unavailable" });
         }
       }
 
@@ -1677,13 +1681,14 @@ export async function registerRoutes(
           }
         } catch (e) {
           console.error("Litecoin Space wallet txs error:", e);
+          return res.status(503).json({ error: "Litecoin API unavailable" });
         }
       }
 
-      res.json([]);
+      return res.status(503).json({ error: "Unable to fetch wallet transactions" });
     } catch (error) {
       console.error("Wallet transactions error:", error);
-      res.json([]);
+      return res.status(500).json({ error: "Failed to fetch wallet transactions" });
     }
   });
 
