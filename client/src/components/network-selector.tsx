@@ -1,6 +1,7 @@
 import { useNetwork } from "@/lib/network-context";
 import { cn } from "@/lib/utils";
 import { type NetworkId } from "@shared/schema";
+import { NetworkIcon } from "./crypto-icons";
 
 const networkColors: Record<NetworkId, string> = {
   btc: "bg-orange-500",
@@ -55,11 +56,11 @@ export function NetworkSelector() {
           >
             <span
               className={cn(
-                "w-5 h-5 rounded-full flex items-center justify-center text-white text-xs font-bold",
+                "w-6 h-6 rounded-full flex items-center justify-center text-white",
                 networkColors[network.id]
               )}
             >
-              {network.icon}
+              <NetworkIcon networkId={network.id} className="w-3.5 h-3.5" />
             </span>
             <span className="hidden sm:inline">{network.symbol}</span>
           </button>
@@ -82,7 +83,7 @@ export function NetworkBadge({ networkId }: { networkId: NetworkId }) {
       )}
       data-testid={`badge-network-${networkId}`}
     >
-      <span>{network.icon}</span>
+      <NetworkIcon networkId={networkId} className="w-3 h-3" />
       <span>{network.symbol}</span>
     </span>
   );
